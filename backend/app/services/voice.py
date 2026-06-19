@@ -1,0 +1,363 @@
+"""
+Voice service layer — Sarvam AI (primary) / OpenAI (fallback).
+
+STT: Sarvam Saaras v3 (supports Malayalam, Hindi, English + more Indian languages)
+TTS: Sarvam Bulbul v2 (natural Indian language voices)
+LLM: OpenAI GPT-4o-mini (for RAG enhancement)
+
+If no API keys are configured, browser-based speech is used as a fallback.
+"""
+import base64
+import io
+import json
+from typing import Optional
+
+import httpx
+
+from app.core.config import settings
+
+_SARVAM_BASE = "https://api.sarvam.ai"
+_OPENAI_BASE = "https://api.openai.com/v1"
+
+# Language code mapping: internal code → Sarvam BCP-47 code
+_SARVAM_LANG_MAP = {
+    "en": "en-IN",
+    "ml": "ml-IN",
+    "hi": "hi-IN",
+    "ta": "ta-IN",
+    "te": "te-IN",
+    "kn": "kn-IN",
+}
+
+
+def _sarvam_headers() -> dict:
+    return {"api-subscription-key": settings.SARVAM_API_KEY}
+
+
+def _openai_headers() -> dict:
+    return {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
+
+
+def get_voice_status() -> dict:
+    """Return which voice backends are active."""
+    provider = settings.voice_provider
+    telephony = settings.telephony_provider
+
+    return {
+        "stt": provider,
+        "tts": provider,
+        "tts_providers": ["sarvam", "elevenlabs", "openai", "browser"] if provider == "browser" else [provider],
+        "llm": "openai" if settings.openai_configured else "local",
+        "telephony": telephony,
+        "sarvam_configured": settings.sarvam_configured,
+        "exotel_configured": settings.exotel_configured,
+        "openai_configured": settings.openai_configured,
+        "twilio_configured": settings.twilio_configured,
+        "voice_provider": provider,
+        "telephony_provider": telephony,
+        "message": _status_message(),
+    }
+
+
+def _status_message() -> str:
+    parts = []
+    if settings.sarvam_configured:
+        parts.append("Sarvam AI STT/TTS active (Indian languages supported).")
+    if settings.exotel_configured:
+        parts.append("Exotel telephony active (real inbound/outbound calls enabled).")
+    if not parts:
+        parts.append(
+            "No AI API keys configured. Add SARVAM_API_KEY to backend/.env for production voice. "
+            "Browser speech synthesis used as fallback."
+        )
+    return " ".join(parts)
+
+
+# ── Sarvam AI — Speech-to-Text ────────────────────────────────────────────────
+
+async def sarvam_transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
+    """
+    Transcribe audio using Sarvam AI Saaras v3.
+    Supports: en-IN, ml-IN, hi-IN, ta-IN, te-IN, kn-IN
+    Audio format: WAV/MP3/FLAC/OGG, max 30s for sync API.
+    """
+    if not settings.sarvam_configured or not audio_bytes:
+        return ""
+
+    lang_code = _SARVAM_LANG_MAP.get(language, "en-IN")
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_SARVAM_BASE}/speech-to-text",
+            headers=_sarvam_headers(),
+            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            data={
+                "model": settings.SARVAM_STT_MODEL,
+                "language_code": lang_code,
+                "mode": "transcribe",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        # Sarvam returns {"transcript": "...", ...}
+        return data.get("transcript", "").strip()
+
+
+# ── Sarvam AI — Text-to-Speech ────────────────────────────────────────────────
+
+async def sarvam_synthesize_speech(text: str, language: str = "en") -> Optional[bytes]:
+    """
+    Synthesize speech using Sarvam AI Bulbul v2.
+    Returns raw WAV bytes or None.
+    Language codes: en-IN, ml-IN, hi-IN, etc.
+    """
+    if not settings.sarvam_configured or not text.strip():
+        return None
+
+    lang_code = _SARVAM_LANG_MAP.get(language, "en-IN")
+    speaker = (
+        settings.SARVAM_TTS_SPEAKER_ML if language == "ml"
+        else settings.SARVAM_TTS_SPEAKER_EN
+    )
+
+    payload = {
+        "inputs": [text],
+        "target_language_code": lang_code,
+        "speaker": speaker,
+        "model": settings.SARVAM_TTS_MODEL,
+        "pace": 1.0,
+        "loudness": 1.5,
+        "speech_sample_rate": 22050,
+        "enable_preprocessing": True,
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_SARVAM_BASE}/text-to-speech",
+            headers={**_sarvam_headers(), "Content-Type": "application/json"},
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        # Sarvam returns {"audios": ["<base64-wav>", ...]}
+        audios = data.get("audios", [])
+        if audios:
+            return base64.b64decode(audios[0])
+        return None
+
+
+# ── OpenAI — Speech-to-Text (Whisper fallback) ───────────────────────────────
+
+async def openai_transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
+    """Transcribe audio using OpenAI Whisper. Returns empty string if not configured."""
+    if not settings.openai_configured or not audio_bytes:
+        return ""
+
+    lang_hint = "ml" if language == "ml" else "en"
+    files = {"file": ("audio.webm", audio_bytes, "audio/webm")}
+    data = {"model": "whisper-1", "language": lang_hint}
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_OPENAI_BASE}/audio/transcriptions",
+            headers=_openai_headers(),
+            files=files,
+            data=data,
+        )
+        response.raise_for_status()
+        return response.json().get("text", "").strip()
+
+
+# ── OpenAI — Text-to-Speech (fallback) ───────────────────────────────────────
+
+async def openai_synthesize_speech(text: str, language: str = "en") -> Optional[bytes]:
+    """Synthesize speech using OpenAI TTS. Returns MP3 bytes or None."""
+    if not settings.openai_configured or not text.strip():
+        return None
+
+    voice = settings.OPENAI_TTS_VOICE_ML if language == "ml" else settings.OPENAI_TTS_VOICE_EN
+    payload = {
+        "model": settings.OPENAI_TTS_MODEL,
+        "input": text,
+        "voice": voice,
+        "response_format": "mp3",
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_OPENAI_BASE}/audio/speech",
+            headers={**_openai_headers(), "Content-Type": "application/json"},
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.content
+
+
+async def elevenlabs_synthesize_speech(text: str, language: str = "en") -> Optional[bytes]:
+    """Synthesize speech using ElevenLabs TTS. Returns MP3 bytes or None."""
+    if not settings.elevenlabs_configured or not text.strip():
+        return None
+
+    voice_id = "21m00Tcm4TlvDq8ikWAM"
+    payload = {
+        "text": text,
+        "model_id": "eleven_turbo_v2_5",
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.ELEVENLABS_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.content
+
+# ── Unified API — used by all endpoints ──────────────────────────────────────
+
+async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
+    """
+    Transcribe audio using the best available provider.
+    Priority: Sarvam AI → OpenAI Whisper → empty string (browser fallback)
+    """
+    if settings.sarvam_configured:
+        return await sarvam_transcribe_audio(audio_bytes, language)
+    if settings.openai_configured:
+        return await openai_transcribe_audio(audio_bytes, language)
+    return ""
+
+
+async def synthesize_speech(text: str, language: str = "en") -> Optional[bytes]:
+    """
+    Synthesize speech using the best available provider.
+    Priority: Sarvam AI → OpenAI TTS → None (browser fallback)
+    """
+    if settings.sarvam_configured:
+        return await sarvam_synthesize_speech(text, language)
+    if settings.elevenlabs_configured:
+        return await elevenlabs_synthesize_speech(text, language)
+    if settings.openai_configured:
+        return await openai_synthesize_speech(text, language)
+    return None
+
+
+def search_company_info(search_query: str) -> str:
+    """Search DuckDuckGo for the company."""
+    try:
+        from duckduckgo_search import DDGS
+        results = DDGS().text(f"Bridgeon Skillversity {search_query}", max_results=3)
+        if not results:
+            return "No results found on the web."
+        
+        snippets = []
+        for r in results:
+            snippets.append(f"Title: {r.get('title')}\nSnippet: {r.get('body')}\n")
+        return "\n".join(snippets)
+    except Exception as e:
+        return f"Error searching the web: {str(e)}"
+
+async def enhance_rag_answer(query: str, context: str, language: str = "en") -> str:
+    """Use OpenAI to produce a natural answer, falling back to web search if needed."""
+    if not settings.openai_configured:
+        return context
+
+    lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
+    system = (
+        f"You are Bridgeon Skillversity's phone assistant. "
+        f"Answer the user's question entirely in {lang_label}. "
+        f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
+        f"Use the provided knowledge context. If the context is empty or doesn't contain the answer, "
+        f"use the `search_company_info` tool to browse the web for details. "
+        f"Keep the answer concise and conversational."
+    )
+    user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_company_info",
+                "description": "Search the web for information about Bridgeon Skillversity or general coding courses.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "search_query": {
+                            "type": "string",
+                            "description": "The specific query to search for, e.g., 'React course fee', 'placement reviews'."
+                        }
+                    },
+                    "required": ["search_query"]
+                }
+            }
+        }
+    ]
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{_OPENAI_BASE}/chat/completions",
+            headers={**_openai_headers(), "Content-Type": "application/json"},
+            json={
+                "model": settings.OPENAI_MODEL,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "max_tokens": 400,
+                "temperature": 0.3,
+            },
+        )
+        response.raise_for_status()
+        resp_data = response.json()
+        choice = resp_data["choices"][0]
+        message = choice["message"]
+
+        # Check for tool calls
+        if message.get("tool_calls"):
+            messages.append(message)  # Append assistant's tool call message
+            
+            for tool_call in message["tool_calls"]:
+                if tool_call["function"]["name"] == "search_company_info":
+                    args = json.loads(tool_call["function"]["arguments"])
+                    search_query = args.get("search_query", query)
+                    print(f"[RAG] Executing Web Search for: {search_query}")
+                    
+                    search_result = search_company_info(search_query)
+                    
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "name": tool_call["function"]["name"],
+                        "content": search_result
+                    })
+            
+            # Send second request with tool results
+            response2 = await client.post(
+                f"{_OPENAI_BASE}/chat/completions",
+                headers={**_openai_headers(), "Content-Type": "application/json"},
+                json={
+                    "model": settings.OPENAI_MODEL,
+                    "messages": messages,
+                    "max_tokens": 400,
+                    "temperature": 0.3,
+                },
+            )
+            response2.raise_for_status()
+            resp_data2 = response2.json()
+            return resp_data2["choices"][0]["message"]["content"].strip()
+            
+        return message.get("content", "").strip()
+
+
+def decode_audio_base64(data: str) -> bytes:
+    """Decode base64 audio, stripping data-URL prefix if present."""
+    if "," in data and data.startswith("data:"):
+        data = data.split(",", 1)[1]
+    return base64.b64decode(data)

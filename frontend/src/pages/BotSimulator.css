@@ -1,0 +1,479 @@
+/* ─── BotSimulator.css — Bridgeon Buddy Chat UI ──────────────────────────── */
+
+.bot-sim {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  color: var(--txt-primary);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.bot-sim__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.bot-sim__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.bot-sim__brand-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--grad-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: var(--shadow-glow);
+  flex-shrink: 0;
+}
+
+.bot-sim__brand-name {
+  font-family: var(--font-heading);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.bot-sim__eyebrow {
+  font-size: 0.72rem;
+  color: var(--txt-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.bot-sim__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Language selector as a pill toggle */
+.bot-sim__lang-toggle {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+
+.bot-sim__lang-btn {
+  padding: 0.3rem 0.85rem;
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--txt-muted);
+  cursor: pointer;
+  transition: all var(--trans-fast);
+  font-family: var(--font-body);
+}
+
+.bot-sim__lang-btn.active {
+  background: var(--grad-brand);
+  color: #fff;
+  box-shadow: var(--shadow-glow);
+}
+
+/* ── Info bar ────────────────────────────────────────────────────────────── */
+.bot-sim__info-bar {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-8);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.bot-sim__info-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.78rem;
+}
+
+.bot-sim__info-item span:first-child {
+  color: var(--txt-muted);
+  font-weight: 500;
+}
+
+.bot-sim__info-item code {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  color: var(--clr-brand-light);
+  font-family: var(--font-mono);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Error banner ────────────────────────────────────────────────────────── */
+.bot-sim__error {
+  margin: var(--space-4) var(--space-8);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.25);
+  color: var(--clr-danger);
+  font-size: 0.88rem;
+}
+
+/* ── Setup notice banner ─────────────────────────────────────────────────── */
+.bot-sim__setup-notice {
+  margin: var(--space-4) var(--space-8);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.2);
+  color: var(--txt-primary);
+  font-size: 0.88rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+
+/* ── Main ────────────────────────────────────────────────────────────────── */
+.bot-sim__main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) var(--space-8);
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── Chat panel ──────────────────────────────────────────────────────────── */
+.bot-sim__panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-lg);
+}
+
+.bot-sim__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+
+.bot-sim__panel-avatar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.bot-sim__avatar-orb {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--grad-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  box-shadow: var(--shadow-glow);
+  position: relative;
+}
+
+.bot-sim__avatar-status {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #34d399;
+  border: 2px solid var(--bg-sidebar);
+  box-shadow: 0 0 6px #34d399;
+}
+
+.bot-sim__avatar-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.bot-sim__avatar-sub {
+  font-size: 0.72rem;
+  color: var(--txt-muted);
+}
+
+/* ── Chat log ────────────────────────────────────────────────────────────── */
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 400px;
+  max-height: 55vh;
+}
+
+/* ── Messages ────────────────────────────────────────────────────────────── */
+.message {
+  display: flex;
+  gap: var(--space-3);
+  max-width: 80%;
+  animation: fadeInUp 0.25s var(--ease) both;
+}
+
+.message--user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.message--bot {
+  align-self: flex-start;
+}
+
+.message--system {
+  align-self: center;
+}
+
+.message__avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.message--bot .message__avatar {
+  background: var(--grad-brand);
+  box-shadow: 0 0 12px rgba(108,99,255,0.3);
+}
+
+.message--user .message__avatar {
+  background: var(--grad-teal);
+}
+
+.message__bubble {
+  padding: 0.75rem 1.1rem;
+  border-radius: var(--radius-lg);
+  font-size: 0.92rem;
+  line-height: 1.65;
+  word-break: break-word;
+  position: relative;
+}
+
+.message--bot .message__bubble {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+  color: var(--txt-primary);
+}
+
+.message--user .message__bubble {
+  background: var(--grad-brand);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 0 20px rgba(108,99,255,0.2);
+}
+
+.message--system .message__bubble {
+  background: rgba(108,99,255,0.08);
+  border: 1px dashed var(--border-glow);
+  color: var(--txt-muted);
+  font-size: 0.82rem;
+  border-radius: var(--radius-md);
+  padding: 0.4rem 1rem;
+}
+
+/* Typing indicator */
+.message--typing .message__bubble {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  padding: 0.85rem 1.1rem;
+}
+
+.typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 16px;
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--txt-muted);
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Quick replies ───────────────────────────────────────────────────────── */
+.bot-sim__quick-replies {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 0 var(--space-6) var(--space-3);
+}
+
+.bot-sim__quick-chip {
+  background: rgba(108,99,255,0.08);
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-full);
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--clr-brand-light);
+  cursor: pointer;
+  transition: all var(--trans-fast);
+  font-family: var(--font-body);
+}
+
+.bot-sim__quick-chip:hover {
+  background: rgba(108,99,255,0.16);
+  border-color: var(--clr-brand);
+  transform: translateY(-1px);
+}
+
+/* ── Input row ───────────────────────────────────────────────────────────── */
+.bot-sim__input-row {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  align-items: center;
+}
+
+.bot-sim__input-row input {
+  flex: 1;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  color: var(--txt-primary);
+  font-size: 0.9rem;
+  font-family: var(--font-body);
+  padding: 0.65rem 1.25rem;
+  outline: none;
+  transition: border-color var(--trans-fast), box-shadow var(--trans-fast);
+}
+
+.bot-sim__input-row input:focus {
+  border-color: var(--clr-brand);
+  box-shadow: 0 0 0 3px rgba(108,99,255,0.1);
+}
+
+.bot-sim__input-row input::placeholder { color: var(--txt-muted); }
+.bot-sim__input-row input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.bot-sim__mic-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card-alt);
+  color: var(--txt-secondary);
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--trans-normal);
+  flex-shrink: 0;
+  font-family: var(--font-body);
+}
+
+.bot-sim__mic-btn:hover {
+  border-color: var(--clr-brand);
+  background: rgba(108,99,255,0.1);
+  color: var(--clr-brand-light);
+}
+
+.bot-sim__mic-btn.recording {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.4);
+  color: var(--clr-danger);
+  animation: glow-pulse 1s ease-in-out infinite;
+}
+
+.bot-sim__send-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--grad-brand);
+  color: #fff;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--trans-normal);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-glow);
+}
+
+.bot-sim__send-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+  box-shadow: 0 0 30px rgba(108,99,255,0.5);
+}
+
+.bot-sim__send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── Lead saved banner ───────────────────────────────────────────────────── */
+.bot-sim__lead-banner {
+  margin: 0 var(--space-6) var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(52,211,153,0.08);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: #34d399;
+  font-size: 0.82rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .bot-sim__header { padding: var(--space-3) var(--space-4); }
+  .bot-sim__info-bar { padding: var(--space-3) var(--space-4); }
+  .bot-sim__main { padding: var(--space-4) var(--space-3); }
+  .chat-log { min-height: 300px; max-height: 45vh; padding: var(--space-4); }
+  .bot-sim__input-row { padding: var(--space-3); }
+  .message { max-width: 90%; }
+}
