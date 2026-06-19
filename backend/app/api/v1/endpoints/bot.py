@@ -807,7 +807,8 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
         name = session["lead_data"]["name"] or "there"
         lang = session.get("language", "en")
-        session["state"] = "ended"
+        # Keep call alive — go to open free-form state instead of ending
+        session["state"] = "open"
 
         if not session.get("lead_saved"):
             lead = leads.create_lead_record(
@@ -825,31 +826,37 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             session["consent_whatsapp"] = True
             if lang == "ml":
                 consent_msg = (f"നല്ലത്, {name}! ബ്രോഷർ WhatsApp-ൽ അയച്ചു. "
-                               "ബ്രിഡ്ജിയോൺ Skillversity-യെ ബന്ധപ്പെട്ടതിന് നന്ദി. ഒരു നല്ല ദിവസം!")
+                               "ഒരു ബ്രിഡ്ജിയോൺ കൗൺസലർ ഉടൻ ബന്ധപ്പെടും. "
+                               "ഇനി ഞാൻ എന്തെങ്കിലും സഹായിക്കാൻ കഴിയുമോ? "
+                               "കോഴ്‌സ് വിശദാംശങ്ങൾ, ഫീ, അല്ലെങ്കിൽ മറ്റ് ചോദ്യങ്ങൾ?")
             else:
-                consent_msg = (f"Perfect, {name}! I have dispatched the brochure on WhatsApp. "
-                               "Thank you for contacting Bridgeon Skillversity. Have a wonderful day!")
+                consent_msg = (f"Perfect, {name}! I have dispatched the brochure to your WhatsApp. "
+                               "A Bridgeon counselor will reach out shortly. "
+                               "Is there anything else I can help you with? "
+                               "Feel free to ask about our courses, fees, placements, or anything else!")
             return {
                 "response_text": consent_msg,
-                "state": "ended",
+                "state": "open",
                 "user_type": "prospective",
                 "intent": "consent_granted",
-                "lead_id": session["lead_data"]["lead_id"],
+                "lead_id": session["lead_data"].get("lead_id"),
             }
         else:
             session["consent_whatsapp"] = False
             if lang == "ml":
-                no_consent_msg = (f"ശരി, {name}. ഞങ്ങൾ ഫോൺ കോൾ വഴി മാത്രം "
-                                  "ബന്ധപ്പെടും. ബ്രിഡ്ജിയോണിൽ വിളിച്ചതിന് നന്ദി. ഒരു നല്ല ദിവസം!")
+                no_consent_msg = (f"ശരി, {name}. ഞങ്ങൾ ഫോൺ കോൾ വഴി മാത്രം ബന്ധപ്പെടും. "
+                                  "ഇനി ഞാൻ എന്തെങ്കിലും സഹായിക്കാൻ കഴിയുമോ? "
+                                  "കോഴ്‌സ് വിശദാംശങ്ങൾ, ഫീ, പ്ലേസ്മെന്റ് — ചോദിക്കാം.")
             else:
-                no_consent_msg = (f"No problem, {name}. We will only follow up via a standard phone call. "
-                                  "Thank you for calling Bridgeon. Have a great day!")
+                no_consent_msg = (f"No problem, {name}. We will follow up via phone call. "
+                                  "Is there anything else I can help you with right now? "
+                                  "Feel free to ask about our courses, fees, placements, or schedules!")
             return {
                 "response_text": no_consent_msg,
-                "state": "ended",
+                "state": "open",
                 "user_type": "prospective",
                 "intent": "consent_denied",
-                "lead_id": session["lead_data"]["lead_id"],
+                "lead_id": session["lead_data"].get("lead_id"),
             }
 
     # ── STATE: STUDENT FAQ ──────────────────────────────────────────────────────
@@ -917,14 +924,17 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
                 "intent": "contact_mentor",
             }
         elif any(k in text for k in bye_keywords):
-            session["state"] = "ended"
+            # Keep call alive — go to open state, don't end the call
+            session["state"] = "open"
             if lang == "ml":
-                bye_msg = "സ്വാഗതം! ശ്രദ്ധയോടെ പഠിക്കൂ, ഒരു നല്ല ദിവസം ആശംസിക്കുന്നു!"
+                bye_msg = ("സ്വാഗതം! ശ്രദ്ധയോടെ പഠിക്കൂ. "
+                           "ഇനിയും എന്തെങ്കിലും ചോദ്യങ്ങൾ ഉണ്ടെങ്കിൽ ചോദിക്കൂ!")
             else:
-                bye_msg = "You are welcome! Keep studying hard and have a fantastic day!"
+                bye_msg = ("You are welcome! Keep up the great work. "
+                           "I'm still here if you have any more questions!")
             return {
                 "response_text": bye_msg,
-                "state": "ended",
+                "state": "open",
                 "user_type": "student",
                 "intent": "farewell",
             }
@@ -947,23 +957,132 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
     # ── STATE: ESCALATED ────────────────────────────────────────────────────────
     if state == "escalated":
+        session["state"] = "open"
+        lang = session.get("language", "en")
+        if lang == "ml":
+            esc_msg = ("ഒരു കൗൺസലർ ഉടൻ നിങ്ങളെ ബന്ധപ്പെടും. "
+                       "ഇതിനിടെ, ഞാൻ കോഴ്‌സ്, ഫീ, പ്ലേസ്മെന്റ് "
+                       "അല്ലെങ്കിൽ മറ്റ് ചോദ്യങ്ങൾക്ക് ഉത്തരം നൽകാം. ചോദിക്കൂ!")
+        else:
+            esc_msg = (_escalation_message(session, db) +
+                       " In the meantime, I can still answer questions about our courses, "
+                       "fees, placements, and more. What would you like to know?")
         return {
-            "response_text": _escalation_message(session, db),
-            "state": "escalated",
+            "response_text": esc_msg,
+            "state": "open",
             "user_type": session.get("user_type", "unknown"),
             "intent": "escalated",
         }
 
-    # ── STATE: ENDED ────────────────────────────────────────────────────────────
-    if state == "ended":
-        language = session.get("language", "en")
-        session.clear()
-        session.update(_get_initial_session())
-        session["language"] = language
+    # ── STATE: OPEN — free-form intelligent Q&A (call stays alive) ───────────────
+    if state == "open":
+        lang = session.get("language", "en")
+
+        # Check for explicit goodbye / farewell — acknowledge but KEEP call alive
+        farewell_keywords = ["bye", "goodbye", "thank you", "thanks", "that's all", "that is all",
+                             "nothing else", "no more questions", "ബൈ", "നന്ദി", "ശരി ബൈ",
+                             "മതി", "ഒന്നുമില്ല", "പോകട്ടെ"]
+        is_farewell = any(k in text for k in farewell_keywords)
+        if is_farewell:
+            if lang == "ml":
+                farewell_msg = ("ബ്രിഡ്ജിയോൺ Skillversity-യെ ബന്ധപ്പെട്ടതിന് നന്ദി! "
+                                "ഇനിയും എന്തെങ്കിലും ചോദ്യങ്ങൾ ഉണ്ടെങ്കിൽ ചോദിക്കൂ — "
+                                "ഞാൻ ഇവിടെ ഉണ്ട്.")
+            else:
+                farewell_msg = ("Thank you for calling Bridgeon Skillversity! "
+                                "I'm still here if you have any more questions — "
+                                "feel free to ask about courses, fees, placements, or anything else!")
+            return {
+                "response_text": farewell_msg,
+                "state": "open",
+                "user_type": session.get("user_type", "unknown"),
+                "intent": "farewell",
+            }
+
+        # Try RAG / knowledge base first
+        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=lang)
+        if rag_answer:
+            return {
+                "response_text": rag_answer,
+                "state": "open",
+                "user_type": session.get("user_type", "unknown"),
+                "intent": "rag_response",
+            }
+
+        # Fee / callback fallback
+        fee_keywords = ["fee", "fees", "cost", "price", "pricing", "pay", "charges",
+                        "ഫീസ്", "പൈസ", "ചെലവ്"]
+        placement_keywords = ["placement", "job", "salary", "package", "hire",
+                               "ജോലി", "ശമ്പളം", "പ്ലേസ്മെന്റ്"]
+        if any(k in text for k in fee_keywords):
+            if lang == "ml":
+                reply = ("ഓരോ കോഴ്‌സിന്റെയും ഫീ വ്യത്യസ്തമാണ്. "
+                         "ഞങ്ങളുടെ അഡ്മിഷൻ ടീം കൃത്യമായ വിവരങ്ങൾ നൽകും. "
+                         "MERN Stack, Python, Flutter, Data Science, UI/UX — "
+                         "ഏത് കോഴ്‌സ് ആണ് ആഗ്രഹിക്കുന്നത്?")
+            else:
+                reply = ("Course fees vary by program and payment plan. "
+                         "Bridgeon offers EMI options to make it affordable. "
+                         "Which course interests you — MERN Stack, Python, Flutter, Data Science, or UI/UX? "
+                         "I can get you more specific details.")
+            return {
+                "response_text": reply,
+                "state": "open",
+                "user_type": session.get("user_type", "unknown"),
+                "intent": "faq_response",
+            }
+
+        if any(k in text for k in placement_keywords):
+            if lang == "ml":
+                reply = ("ബ്രിഡ്ജിയോൺ 100% പ്ലേസ്മെന്റ് സഹായം നൽകുന്നു. "
+                         "ഡെവലപ്പർമാർ 2.5 LPA മുതൽ 4.9+ LPA വരെ ശമ്പളത്തിൽ ജോലി ചെയ്യുന്നു. "
+                         "മറ്റ് ചോദ്യങ്ങൾ ഉണ്ടോ?")
+            else:
+                reply = ("Bridgeon provides 100% placement support with dedicated career guidance. "
+                         "Our graduates are placed at 2.5 LPA to 4.9+ LPA starting packages. "
+                         "Is there anything specific about placements you'd like to know?")
+            return {
+                "response_text": reply,
+                "state": "open",
+                "user_type": session.get("user_type", "unknown"),
+                "intent": "faq_response",
+            }
+
+        # Generic knowledgeable fallback — stay on call
+        record_knowledge_gap(db, raw_text, category="Open Q&A")
+        if lang == "ml":
+            fallback = ("നല്ല ചോദ്യം! ഞങ്ങളുടെ ടീം ഉടൻ നിങ്ങൾക്ക് ഈ വിഷയത്തിൽ "
+                        "വിശദമായ ഉത്തരം നൽകും. ഇതിനിടെ, MERN Stack, Python, Flutter, "
+                        "Data Science, UI/UX — ഏത് കോഴ്‌സിൽ ആണ് താൽപ്പര്യം? "
+                        "ഫീ, പ്ലേസ്മെന്റ്, ഷെഡ്യൂൾ — ഇവ ഞാൻ ഇപ്പോൾ പറഞ്ഞുതരാം.")
+        else:
+            fallback = ("Great question! Our admissions team will have a detailed answer for you. "
+                        "In the meantime, I can tell you about our courses — MERN Stack, Python Full Stack, "
+                        "Flutter, Data Science, and UI/UX Design — including fees, placement rates, "
+                        "and schedules. What would you like to explore?")
         return {
-            "response_text": _greeting_text(language, db),
-            "state": "greeting",
-            "user_type": "unknown",
+            "response_text": fallback,
+            "state": "open",
+            "user_type": session.get("user_type", "unknown"),
+            "intent": "faq_response",
+        }
+
+    # ── STATE: ENDED — redirect to open to keep call alive ───────────────────────
+    if state == "ended":
+        lang = session.get("language", "en")
+        session["state"] = "open"
+        if lang == "ml":
+            continue_msg = ("ഇനിയും ഞാൻ സഹായിക്കാൻ ഇവിടെ ഉണ്ട്. "
+                            "കോഴ്‌സ്, ഫീ, പ്ലേസ്മെന്റ് — "
+                            "ഏത് ചോദ്യവും ചോദിക്കൂ!")
+        else:
+            continue_msg = ("I'm still here if you have more questions! "
+                            "Feel free to ask about our courses, fees, placements, "
+                            "or anything else about Bridgeon Skillversity.")
+        return {
+            "response_text": continue_msg,
+            "state": "open",
+            "user_type": session.get("user_type", "unknown"),
             "intent": "greeting",
         }
 

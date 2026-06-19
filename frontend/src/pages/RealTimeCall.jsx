@@ -36,6 +36,13 @@ export default function RealTimeCall() {
   // Keep stateRef in sync
   useEffect(() => { stateRef.current = callState }, [callState])
 
+  const isListeningRef = useRef(false)
+  const languageRef = useRef(language)
+  const sessionIdRef = useRef(sessionId)
+
+  useEffect(() => { languageRef.current = language }, [language])
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
+
   // ── Microphone Permission ──────────────────────────────────────────────────
   const requestMicPermission = async () => {
     try {
@@ -91,18 +98,16 @@ export default function RealTimeCall() {
 
   // ── Speech Recognition ─────────────────────────────────────────────────────
   const stopRecognition = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null
-      recognitionRef.current.onerror = null
-      recognitionRef.current.onresult = null
-      try { recognitionRef.current.abort() } catch (_) {}
-      recognitionRef.current = null
+    if (recognitionRef.current && isListeningRef.current) {
+      try {
+        recognitionRef.current.abort()
+      } catch (_) {}
+      isListeningRef.current = false
     }
   }
 
   const startRecognition = async () => {
     console.log('[RTC] startRecognition called, state:', stateRef.current)
-    stopRecognition()
     if (isMuted) return
 
     if (!micAuthorized) {
@@ -110,83 +115,103 @@ export default function RealTimeCall() {
       if (!ok) return
     }
 
-    const recognition = createSpeechRecognition(language)
-    if (!recognition) { setError('Speech recognition not supported.'); return }
-
-    recognitionRef.current = recognition
-      recognition.continuous = false;
-      recognition.interimResults = true;
-
-    recognition.onstart = () => console.log('[RTC] recognition.onstart fired')
-
-    // Barge-in: if the bot is speaking and user starts talking, stop the bot immediately
-    recognition.onspeechstart = () => {
-      console.log('[RTC] onspeechstart, state:', stateRef.current)
-      if (stateRef.current === 'speaking') {
-        console.log('[RTC] Barge-in! Cancelling bot audio.')
-        cancelActiveAudio()
-        setCallState('listening')
+    // Ensure we have a single persistent SpeechRecognition instance
+    if (!recognitionRef.current) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      if (!SpeechRecognition) {
+        setError('Speech recognition not supported.')
+        return
       }
-    }
 
-    recognition.onresult = async (event) => {
-      let finalStr = ''
-      let interimStr = ''
-      
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalStr += event.results[i][0].transcript
-        } else {
-          interimStr += event.results[i][0].transcript
+      const rec = new SpeechRecognition()
+      rec.continuous = false
+      rec.interimResults = true
+
+      rec.onstart = () => {
+        console.log('[RTC] recognition.onstart fired')
+        isListeningRef.current = true
+      }
+
+      rec.onend = () => {
+        console.log('[RTC] recognition.onend, state:', stateRef.current)
+        isListeningRef.current = false
+
+        // Auto-restart if we are still in listening or speaking state
+        const s = stateRef.current
+        if (s === 'listening' || s === 'speaking') {
+          setTimeout(() => {
+            if (stateRef.current === 'listening' || stateRef.current === 'speaking') {
+              startRecognition()
+            }
+          }, 200)
         }
       }
-      
-      setInterimTranscript(interimStr)
 
-      const text = finalStr.trim()
-      if (!text) return
-
-      // If bot was speaking, cancel it
-      if (stateRef.current === 'speaking') {
-        cancelActiveAudio()
+      rec.onspeechstart = () => {
+        console.log('[RTC] onspeechstart, state:', stateRef.current)
+        if (stateRef.current === 'speaking') {
+          console.log('[RTC] Barge-in! Cancelling bot audio.')
+          cancelActiveAudio()
+          setCallState('listening')
+        }
       }
 
-      console.log('[RTC] User said:', text)
-      setInterimTranscript('')
-      stopRecognition() // stop listening while we process
-      setCallState('processing')
-      setTranscripts((prev) => [...prev, { role: 'user', text }])
+      rec.onresult = async (event) => {
+        let finalStr = ''
+        let interimStr = ''
+        
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalStr += event.results[i][0].transcript
+          } else {
+            interimStr += event.results[i][0].transcript
+          }
+        }
+        
+        setInterimTranscript(interimStr)
 
+        const text = finalStr.trim()
+        if (!text) return
+
+        if (stateRef.current === 'speaking') {
+          cancelActiveAudio()
+        }
+
+        console.log('[RTC] User said:', text)
+        setInterimTranscript('')
+        stopRecognition() // stop listening while we process
+        setCallState('processing')
+        setTranscripts((prev) => [...prev, { role: 'user', text }])
+
+        try {
+          await handleBotTurn(text)
+        } catch (err) {
+          setError(err.message || 'Error processing response.')
+          setCallState('listening')
+          startRecognition()
+        }
+      }
+
+      rec.onerror = (event) => {
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          console.error('[RTC] recognition error:', event.error)
+        }
+      }
+
+      recognitionRef.current = rec
+    }
+
+    // Dynamically update the language lang code on the persistent instance
+    recognitionRef.current.lang = languageRef.current === 'ml' ? 'ml-IN' : 'en-IN'
+
+    // Start recognition only if it's not already active
+    if (!isListeningRef.current) {
       try {
-        await handleBotTurn(text)
+        recognitionRef.current.start()
+        console.log('[RTC] recognition.start() succeeded')
       } catch (err) {
-        setError(err.message || 'Error processing response.')
-        setCallState('listening')
-        startRecognition()
+        console.error('[RTC] Failed to start recognition:', err)
       }
-    }
-
-    recognition.onerror = (event) => {
-      if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        console.error('[RTC] recognition error:', event.error)
-      }
-    }
-
-    // Auto-restart recognition when it ends (browser kills it periodically)
-    recognition.onend = () => {
-      console.log('[RTC] recognition.onend, state:', stateRef.current)
-      // Only restart if call is still active and we're in listening/speaking state
-      const s = stateRef.current
-      if (s === 'listening' || s === 'speaking') {
-        setTimeout(() => startRecognition(), 200)
-      }
-    }
-
-    try {
-      recognition.start()
-      console.log('[RTC] recognition.start() succeeded')
-    } catch (err) {
-      console.error('[RTC] Failed to start recognition:', err)
     }
   }
 
@@ -247,12 +272,8 @@ export default function RealTimeCall() {
 
       await playBotResponse(response.bot_response, response.audio_uri)
 
-      const intent = response.intent || ''
-      const isEnd = response.outcome === 'completed' || response.outcome === 'escalated' ||
-                    intent === 'farewell' || intent === 'escalated'
-      if (isEnd) {
-        setTimeout(() => hangUp(true), 1500)
-      }
+      // Call NEVER auto-ends — only the user can hang up by pressing the red button.
+      // The bot stays alive in 'open' state answering any further questions.
     } catch (err) {
       setError('Unable to reach server. Call disconnected.')
       hangUp()
@@ -394,6 +415,67 @@ export default function RealTimeCall() {
           )}
           <div ref={transcriptsEndRef} />
         </div>
+
+        {/* Keyboard Input Fallback (Allows typing responses if SpeechRecognition is blocked/failing) */}
+        {(callState === 'listening' || callState === 'speaking' || callState === 'processing') && (
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              const text = e.target.elements.chatInput.value.trim();
+              if (text) {
+                e.target.elements.chatInput.value = '';
+                cancelActiveAudio(); // interrupt bot if typing
+                stopRecognition();
+                setCallState('processing');
+                setTranscripts((prev) => [...prev, { role: 'user', text }]);
+                handleBotTurn(text);
+              }
+            }}
+            className="rtc__text-input-form glass"
+            style={{
+              display: 'flex',
+              gap: '0.5rem',
+              width: '100%',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '30px',
+              padding: '0.4rem 0.6rem 0.4rem 1.2rem',
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+            }}
+          >
+            <input
+              name="chatInput"
+              type="text"
+              placeholder="Or type your response here..."
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                color: '#fff',
+                fontSize: '0.85rem',
+                outline: 'none',
+              }}
+              autoComplete="off"
+            />
+            <button 
+              type="submit" 
+              style={{
+                background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                border: 'none',
+                color: '#fff',
+                padding: '0.4rem 1.1rem',
+                borderRadius: '20px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(124, 58, 237, 0.3)',
+              }}
+            >
+              Send
+            </button>
+          </form>
+        )}
       </div>
 
       {/* Controls — only 3 buttons: Mute, Call/Hangup, Speaker */}
