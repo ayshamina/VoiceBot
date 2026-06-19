@@ -2,10 +2,6 @@ import os
 from pathlib import Path
 
 from pypdf import PdfReader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
 
 
 def ingest_pdf(file_path: str, collection_name: str = "bridgeon_docs") -> None:
@@ -13,6 +9,16 @@ def ingest_pdf(file_path: str, collection_name: str = "bridgeon_docs") -> None:
 
     The collection is persisted under `backend/data/vectorstore/{collection_name}`.
     """
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from langchain_openai import OpenAIEmbeddings
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        from langchain_community.vectorstores import Chroma
+    except ImportError:
+        raise ImportError(
+            "LangChain and Chroma dependencies are required for PDF ingestion. "
+            "Please run: pip install langchain-text-splitters langchain-openai langchain-community chromadb"
+        )
     # 1️⃣ Extract raw text from PDF pages
     reader = PdfReader(file_path)
     text_list = []

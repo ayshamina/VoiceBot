@@ -64,7 +64,8 @@ async def test_send_whatsapp_live_success(mock_post):
     mock_post.return_value = MagicMock(status_code=201, is_success=True)
 
     with patch("app.core.config.settings.TWILIO_ACCOUNT_SID", "ACxxxxxx"), \
-         patch("app.core.config.settings.TWILIO_AUTH_TOKEN", "fake_token"):
+         patch("app.core.config.settings.TWILIO_AUTH_TOKEN", "fake_token"), \
+         patch("app.core.config.settings.TWILIO_PHONE_NUMBER", "+1234567890"):
         res = await messaging.send_whatsapp("+919999999999", "Hello WhatsApp", media_url="http://test.pdf")
         
         assert res is True
@@ -82,7 +83,8 @@ async def test_send_sms_live_success(mock_post):
     mock_post.return_value = MagicMock(status_code=201, is_success=True)
 
     with patch("app.core.config.settings.TWILIO_ACCOUNT_SID", "ACxxxxxx"), \
-         patch("app.core.config.settings.TWILIO_AUTH_TOKEN", "fake_token"):
+         patch("app.core.config.settings.TWILIO_AUTH_TOKEN", "fake_token"), \
+         patch("app.core.config.settings.TWILIO_PHONE_NUMBER", "+1234567890"):
         res = await messaging.send_sms("+919999999999", "Hello SMS")
         
         assert res is True
