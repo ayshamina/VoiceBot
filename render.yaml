@@ -1,0 +1,78 @@
+# Render Blueprint Specification File for VoiceBot Deployment
+# For more info, see: https://render.com/docs/blueprints
+
+databases:
+  - name: voicebot-db
+    databaseName: voicebot_db
+    user: voicebot
+    plan: free
+
+services:
+  # ── FastAPI Backend Web Service ──────────────────────────────────────────
+  - type: web
+    name: voicebot-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Database Connection (automatically injected from the postgres database)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: voicebot-db
+          property: connectionString
+
+      # App Settings
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_ECHO
+        value: "false"
+
+      # Authentication
+      - key: ADMIN_TOKEN
+        generateValue: true # Generates a random secure token automatically
+
+      # CORS Configuration (User should update this to their frontend URL in the dashboard)
+      - key: ALLOWED_ORIGINS
+        sync: false
+        value: "http://localhost:5173,http://localhost:5174"
+
+      # ── Voice AI and Telephony Keys (Optional/Fill in dashboard) ───────────
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: EXOTEL_ACCOUNT_SID
+        sync: false
+      - key: EXOTEL_API_KEY
+        sync: false
+      - key: EXOTEL_API_TOKEN
+        sync: false
+      - key: EXOTEL_PHONE_NUMBER
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # ── SMTP Email Settings (Optional/Fill in dashboard) ───────────────────
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+
+  # ── React Frontend Static Site ─────────────────────────────────────────────
+  - type: static
+    name: voicebot-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      # Rewrite all traffic to index.html to support React Router client-side routing
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # API Base URL. Update this in the dashboard with your actual backend service URL.
+      - key: VITE_API_BASE_URL
+        sync: false
+        value: "https://voicebot-backend.onrender.com/api/v1"

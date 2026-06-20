@@ -14,6 +14,9 @@ This task document breaks the PRD into phased, step-by-step work items for build
 6. [x] Install frontend Node.js dependencies
 7. [x] Verify backend starts and `/health` returns 200
 8. [x] Verify frontend opens and displays live backend status
+9. [x] Create `render.yaml` blueprint configuration in workspace root
+10. [x] Verify `render.yaml` syntax matches Render Blueprint requirements
+11. [x] Create deployment documentation and walkthrough
 
 Deliverable: backend starts, frontend opens, and the app is visibly running.
 
