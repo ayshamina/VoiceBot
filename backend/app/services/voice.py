@@ -272,6 +272,7 @@ async def enhance_rag_answer(query: str, context: str, language: str = "en") -> 
         f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
         f"Use the provided knowledge context. If the context is empty or doesn't contain the answer, "
         f"use the `search_company_info` tool to browse the web for details. "
+        f"If you use the `search_company_info` tool, you must start your response by acknowledging it (e.g. 'According to our website...' or in Malayalam 'ഞങ്ങളുടെ വെബ്സൈറ്റ് അനുസരിച്ച്...'). "
         f"Keep the answer concise and conversational."
     )
     user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
