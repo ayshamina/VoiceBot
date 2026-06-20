@@ -35,7 +35,6 @@ services:
 
       # CORS Configuration (User should update this to their frontend URL in the dashboard)
       - key: ALLOWED_ORIGINS
-        sync: false
         value: "http://localhost:5173,http://localhost:5174"
 
       # ── Voice AI and Telephony Keys (Optional/Fill in dashboard) ───────────
@@ -74,5 +73,4 @@ services:
     envVars:
       # API Base URL. Update this in the dashboard with your actual backend service URL.
       - key: VITE_API_BASE_URL
-        sync: false
         value: "https://voicebot-backend.onrender.com/api/v1"
