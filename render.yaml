@@ -59,7 +59,7 @@ services:
         sync: false
 
   # ── React Frontend Static Site ─────────────────────────────────────────────
-  - type: static
+  - type: web
     name: voicebot-frontend
     runtime: static
     plan: free
