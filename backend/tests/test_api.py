@@ -265,7 +265,9 @@ def test_bot_long_term_memory_greeting():
         db.close()
 
 
-def test_bot_adaptive_intent_switching():
+@patch("app.services.voice.search_company_info")
+def test_bot_adaptive_intent_switching(mock_search):
+    mock_search.return_value = "No results found."
     session_id = "test-adaptive-switch"
     client.post("/api/v1/bot/reset", json={"session_id": session_id})
     

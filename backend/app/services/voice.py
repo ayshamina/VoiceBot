@@ -17,7 +17,7 @@ import httpx
 from app.core.config import settings
 
 _SARVAM_BASE = "https://api.sarvam.ai"
-_OPENAI_BASE = "https://api.openai.com/v1"
+_OPENAI_BASE = settings.OPENAI_API_BASE
 
 # Language code mapping: internal code → Sarvam BCP-47 code
 _SARVAM_LANG_MAP = {
@@ -205,7 +205,7 @@ async def elevenlabs_synthesize_speech(text: str, language: str = "en") -> Optio
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
     }
     headers = {
-        "Authorization": f"Bearer {settings.ELEVENLABS_API_KEY}",
+        "xi-api-key": settings.ELEVENLABS_API_KEY,
         "Content-Type": "application/json",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -234,14 +234,32 @@ async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
 async def synthesize_speech(text: str, language: str = "en") -> Optional[bytes]:
     """
     Synthesize speech using the best available provider.
-    Priority: Sarvam AI → OpenAI TTS → None (browser fallback)
+    Priority: ElevenLabs → Sarvam AI → OpenAI TTS → None (browser fallback)
     """
-    if settings.sarvam_configured:
-        return await sarvam_synthesize_speech(text, language)
     if settings.elevenlabs_configured:
-        return await elevenlabs_synthesize_speech(text, language)
+        try:
+            audio = await elevenlabs_synthesize_speech(text, language)
+            if audio:
+                return audio
+        except Exception as e:
+            print(f"[VoiceService] ElevenLabs synthesis failed, trying fallback: {e}")
+
+    if settings.sarvam_configured:
+        try:
+            audio = await sarvam_synthesize_speech(text, language)
+            if audio:
+                return audio
+        except Exception as e:
+            print(f"[VoiceService] Sarvam synthesis failed, trying fallback: {e}")
+
     if settings.openai_configured:
-        return await openai_synthesize_speech(text, language)
+        try:
+            audio = await openai_synthesize_speech(text, language)
+            if audio:
+                return audio
+        except Exception as e:
+            print(f"[VoiceService] OpenAI synthesis failed: {e}")
+
     return None
 
 
@@ -259,6 +277,46 @@ def search_company_info(search_query: str) -> str:
         return "\n".join(snippets)
     except Exception as e:
         return f"Error searching the web: {str(e)}"
+
+async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "en") -> Optional[str]:
+    """Use Sarvam AI LLM (sarvam-30b) to produce a natural answer in Malayalam or English."""
+    if not settings.sarvam_configured:
+        return None
+
+    lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
+    system = (
+        f"You are Bridgeon Skillversity's phone assistant. "
+        f"Answer the user's question entirely in {lang_label}. "
+        f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
+        f"Use the provided knowledge context. "
+        f"Keep the answer concise and conversational."
+    )
+    user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
+
+    headers = {
+        "api-subscription-key": settings.SARVAM_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "sarvam-30b",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 1500
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            "https://api.sarvam.ai/v1/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        resp_json = response.json()
+        return resp_json["choices"][0]["message"]["content"].strip()
+
 
 async def enhance_rag_answer(query: str, context: str, language: str = "en") -> str:
     """Use OpenAI to produce a natural answer, falling back to web search if needed."""

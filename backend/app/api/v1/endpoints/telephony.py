@@ -571,8 +571,10 @@ async def exotel_inbound_recording(
     bot_state = bot_response.get("state", "unknown")
     tlog.info(f"Bot response", state=bot_state, intent=bot_response.get('intent'), text_preview=response_text[:80])
 
+    updated_language = bot_response.get("language", language)
+
     # ── Generate TTS for the bot response ──
-    response_audio_url = await _generate_play_url(response_text, language)
+    response_audio_url = await _generate_play_url(response_text, updated_language)
 
     # ── Log the call turn ──
     call_id = f"call-{uuid4().hex[:8]}"
@@ -580,7 +582,7 @@ async def exotel_inbound_recording(
         "call_id": call_id,
         "caller_number": caller,
         "duration_seconds": 30.0,
-        "language": language,
+        "language": updated_language,
         "outcome": "in_progress" if bot_state not in ("ended", "escalated") else bot_state,
         "call_metadata": {
             "transcript": transcript,
@@ -598,7 +600,7 @@ async def exotel_inbound_recording(
         # Continue conversation — play response and record next caller input
         next_record_url = (
             f"{settings.BACKEND_PUBLIC_URL}/api/v1/telephony/inbound/recording"
-            f"?session_id={session_id}&caller={quote(caller, safe='')}&language={language}"
+            f"?session_id={session_id}&caller={quote(caller, safe='')}&language={updated_language}"
         )
         xml = _build_exoml_response(response_text, response_audio_url, record_url=next_record_url)
 
@@ -873,13 +875,15 @@ async def twilio_inbound_recording(
     response_text = bot_response.get("response_text", "Thank you for calling Bridgeon.")
     bot_state = bot_response.get("state", "unknown")
 
+    updated_language = bot_response.get("language", language)
+
     # Log the call turn
     call_id = f"call-{uuid4().hex[:8]}"
     log_call(db, {
         "call_id": call_id,
         "caller_number": caller,
         "duration_seconds": 30.0,
-        "language": language,
+        "language": updated_language,
         "outcome": "in_progress" if bot_state not in ("ended", "escalated") else bot_state,
         "call_metadata": {
             "transcript": transcript,
@@ -893,7 +897,7 @@ async def twilio_inbound_recording(
     })
 
     # Play the response
-    response.say(response_text)
+    response.say(response_text, language="ml-IN" if updated_language == "ml" else "en-IN")
 
     # If conversation ended, hang up
     if bot_state in ("ended", "escalated"):
@@ -902,7 +906,7 @@ async def twilio_inbound_recording(
         # Continue conversation — record next caller input
         next_record_url = (
             f"{settings.BACKEND_PUBLIC_URL}/api/v1/telephony/twilio/inbound/recording"
-            f"?session_id={session_id}&caller={caller}&language={language}"
+            f"?session_id={session_id}&caller={caller}&language={updated_language}"
         )
         response.record(
             action=next_record_url,

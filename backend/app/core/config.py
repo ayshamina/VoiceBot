@@ -51,6 +51,7 @@ class Settings:
 
     # ── OpenAI (Optional fallback — STT/TTS/LLM) ─────────────────────────────
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_API_BASE: str = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_TTS_MODEL: str = os.getenv("OPENAI_TTS_MODEL", "tts-1")
     OPENAI_TTS_VOICE_ML: str = os.getenv("OPENAI_TTS_VOICE_ML", "shimmer")
@@ -112,10 +113,10 @@ class Settings:
     @property
     def voice_provider(self) -> str:
         """Returns the active STT/TTS provider name."""
-        if self.sarvam_configured:
-            return "sarvam"
         if self.elevenlabs_configured:
             return "elevenlabs"
+        if self.sarvam_configured:
+            return "sarvam"
         if self.openai_configured:
             return "openai"
         return "browser"

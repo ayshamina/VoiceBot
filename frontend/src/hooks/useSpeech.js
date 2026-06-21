@@ -21,7 +21,8 @@ export async function speakTextWithBackend(text, language = 'en') {
   try {
     const result = await synthesizeSpeech(text, language)
     if (result?.audio_base64) {
-      const audio = new Audio(`data:audio/mpeg;base64,${result.audio_base64}`)
+      const mime = result.content_type || 'audio/mpeg'
+      const audio = new Audio(`data:${mime};base64,${result.audio_base64}`)
       await audio.play()
       return { ok: true, provider: result.provider || 'openai' }
     }
@@ -98,7 +99,8 @@ export async function speakTextWithBackendPromise(text, language = 'en') {
   try {
     const result = await synthesizeSpeech(text, language)
     if (result?.audio_base64) {
-      const audioUri = `data:audio/mpeg;base64,${result.audio_base64}`
+      const mime = result.content_type || 'audio/mpeg'
+      const audioUri = `data:${mime};base64,${result.audio_base64}`
       const ok = await speakAudioUriPromise(audioUri)
       return { ok, provider: result.provider || 'openai' }
     }

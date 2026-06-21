@@ -79,7 +79,8 @@ async def synthesize(payload: SynthesizePayload):
             detail="Server TTS unavailable. Set OPENAI_API_KEY in backend/.env or use browser speech.",
         )
 
-    return Response(content=audio, media_type="audio/mpeg")
+    mime = "audio/wav" if audio.startswith(b"RIFF") else "audio/mpeg"
+    return Response(content=audio, media_type=mime)
 
 
 @router.post("/synthesize/json", response_model=SynthesizeResponse, summary="TTS as base64 JSON")
@@ -96,7 +97,10 @@ async def synthesize_json(payload: SynthesizePayload):
             detail="Server TTS unavailable. Set OPENAI_API_KEY in backend/.env or use browser speech.",
         )
 
+    mime = "audio/wav" if audio.startswith(b"RIFF") else "audio/mpeg"
+    provider = "sarvam" if mime == "audio/wav" else settings.voice_provider
     return SynthesizeResponse(
         audio_base64=base64.b64encode(audio).decode("ascii"),
-        provider=settings.voice_provider,
+        provider=provider,
+        content_type=mime,
     )

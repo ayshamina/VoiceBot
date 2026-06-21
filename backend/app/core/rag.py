@@ -152,23 +152,39 @@ def retrieve_grounded_answer(query: str, db: Session, language: str = "en", top_
 async def retrieve_grounded_answer_async(
     query: str, db: Session, language: str = "en", top_k: int = 2
 ) -> str:
-    """RAG answer with optional OpenAI enhancement when API key is configured."""
+    """RAG answer with optional OpenAI/Sarvam enhancement when API keys are configured."""
     docs = retrieve_relevant_docs(query, db, top_k=top_k)
     context = ""
     if docs:
         context = _build_context(docs, language)
 
-    from app.core.config import settings
-    from app.services.voice import enhance_rag_answer
+    if not context:
+        from app.services.voice import search_company_info
+        print(f"[RAG] No local context found, running web search for query: {query}")
+        search_results = search_company_info(query)
+        if search_results and "Error searching the web" not in search_results and "No results found" not in search_results:
+            context = f"Web Search Results:\n{search_results}"
 
+    from app.core.config import settings
+    from app.services.voice import enhance_rag_answer, sarvam_enhance_rag_answer
+
+    # 1. Try OpenAI RAG enhancement first
     if settings.openai_configured:
         try:
             enhanced = await enhance_rag_answer(query, context, language)
             if enhanced:
                 return enhanced
         except Exception as e:
-            # OpenAI quota/network errors — fall back to local context silently
-            print(f"[RAG] OpenAI enhancement failed ({type(e).__name__}), using local context.")
+            print(f"[RAG] OpenAI enhancement failed ({type(e).__name__}), trying Sarvam fallback.")
+
+    # 2. Fall back to Sarvam AI LLM RAG enhancement
+    if settings.sarvam_configured:
+        try:
+            enhanced = await sarvam_enhance_rag_answer(query, context, language)
+            if enhanced:
+                return enhanced
+        except Exception as e:
+            print(f"[RAG] Sarvam LLM enhancement failed: {e}")
 
     if not context:
         return ""

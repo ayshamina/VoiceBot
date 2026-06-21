@@ -34,7 +34,7 @@ export default function BotSimulator() {
   const [error, setError]             = useState(null)
   const [started, setStarted]         = useState(false)
   const [leadId, setLeadId]           = useState(null)
-  const [languageMode, setLanguageMode] = useState('en')
+  const [languageMode, setLanguageMode] = useState('auto')
   const [botLanguage, setBotLanguage] = useState('en')
   const [isListening, setIsListening] = useState(false)
   const [isSpeakerOn, setIsSpeakerOn] = useState(true)
@@ -63,8 +63,9 @@ export default function BotSimulator() {
       const res = await chatBot({ text: '__START__', session_id: session, language: resolvedLang })
       setStarted(true)
       appendMessage('bot', res.response_text)
-      setBotLanguage(resolvedLang)
-      if (isSpeakerOn) speakTextWithBackendPromise(res.response_text, resolvedLang)
+      const nextLang = res.language || resolvedLang
+      setBotLanguage(nextLang)
+      if (isSpeakerOn) speakTextWithBackendPromise(res.response_text, nextLang)
     } catch (err) {
       setError(err.message || 'Unable to start bot simulation. Is the backend running?')
       setStarted(false)
@@ -108,7 +109,7 @@ export default function BotSimulator() {
 
   const handleListen = async () => {
     setError(null)
-    const lang = languageMode === 'auto' ? botLanguage : languageMode
+    const lang = languageMode === 'auto' ? 'ml' : languageMode
     if (isListening) {
       if (recognitionRef.current) { try { recognitionRef.current.abort() } catch (e) {} ; recognitionRef.current = null }
       setIsListening(false)
@@ -148,12 +149,13 @@ export default function BotSimulator() {
     setStatus('pending')
     setError(null)
     try {
-      const resolvedLang = languageMode === 'auto' ? 'en' : languageMode
+      const resolvedLang = languageMode === 'auto' ? botLanguage : languageMode
       const res = await chatBot({ text: userText, session_id: sessionId, language: resolvedLang })
       appendMessage('bot', res.response_text)
       if (res.lead_id) setLeadId(res.lead_id)
-      setBotLanguage(resolvedLang)
-      if (isSpeakerOn) speakTextWithBackendPromise(res.response_text, resolvedLang)
+      const nextLang = res.language || resolvedLang
+      setBotLanguage(nextLang)
+      if (isSpeakerOn) speakTextWithBackendPromise(res.response_text, nextLang)
     } catch (err) {
       setError(err.message || 'Bot request failed.')
     } finally {
@@ -201,6 +203,10 @@ export default function BotSimulator() {
         <div className="bot-sim__actions">
           {/* Language toggle */}
           <div className="bot-sim__lang-toggle">
+            <button
+              className={`bot-sim__lang-btn ${languageMode === 'auto' ? 'active' : ''}`}
+              onClick={() => setLanguageMode('auto')}
+            >🤖 AUTO</button>
             <button
               className={`bot-sim__lang-btn ${languageMode === 'en' ? 'active' : ''}`}
               onClick={() => setLanguageMode('en')}

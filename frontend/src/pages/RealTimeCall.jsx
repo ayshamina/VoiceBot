@@ -16,7 +16,7 @@ export default function RealTimeCall() {
   const [callState, setCallState] = useState('idle') // idle | ringing | connected | speaking | listening | processing | ended
   const [duration, setDuration] = useState(0)
   const [transcripts, setTranscripts] = useState([])
-  const [language, setLanguage] = useState('en')
+  const [language, setLanguage] = useState('auto')
   const [isMuted, setIsMuted] = useState(false)
   const [isSpeakerOn, setIsSpeakerOn] = useState(true)
   const [voiceStatus, setVoiceStatus] = useState(null)
@@ -74,6 +74,18 @@ export default function RealTimeCall() {
       setError('Your browser does not support speech recognition. Use Chrome or Edge.')
     }
     return () => { stopTimer(); stopRecognition() }
+  }, [])
+
+  // Load ElevenLabs Conversational AI Widget script
+  useEffect(() => {
+    const script = document.createElement('script')
+    script.src = 'https://elevenlabs.io/convai-widget/index.js'
+    script.async = true
+    script.type = 'text/javascript'
+    document.body.appendChild(script)
+    return () => {
+      document.body.removeChild(script)
+    }
   }, [])
 
   // Auto-scroll transcript
@@ -195,6 +207,7 @@ export default function RealTimeCall() {
       rec.onerror = (event) => {
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
           console.error('[RTC] recognition error:', event.error)
+          setError(`Speech recognition error: ${event.error}. Please verify microphone access.`)
         }
       }
 
@@ -202,7 +215,8 @@ export default function RealTimeCall() {
     }
 
     // Dynamically update the language lang code on the persistent instance
-    recognitionRef.current.lang = languageRef.current === 'ml' ? 'ml-IN' : 'en-IN'
+    // Default to 'ml-IN' in auto mode to recognize Malayalam script (bilingual code-switching allows English Latin characters too)
+    recognitionRef.current.lang = (languageRef.current === 'ml' || languageRef.current === 'auto') ? 'ml-IN' : 'en-IN'
 
     // Start recognition only if it's not already active
     if (!isListeningRef.current) {
@@ -253,7 +267,7 @@ export default function RealTimeCall() {
       connectAudio.current.play().catch(() => {})
       setCallState('connected')
 
-      await playBotResponse(response.bot_response, response.audio_uri)
+      await playBotResponse(response.bot_response, response.audio_uri, response.language)
     } catch (err) {
       setError('Call setup failed. Make sure the backend is running.')
       ringtoneAudio.current.pause()
@@ -270,7 +284,7 @@ export default function RealTimeCall() {
         session_id: sessionId,
       })
 
-      await playBotResponse(response.bot_response, response.audio_uri)
+      await playBotResponse(response.bot_response, response.audio_uri, response.language)
 
       // Call NEVER auto-ends — only the user can hang up by pressing the red button.
       // The bot stays alive in 'open' state answering any further questions.
@@ -280,9 +294,15 @@ export default function RealTimeCall() {
     }
   }
 
-  const playBotResponse = async (text, audioUri) => {
+  const playBotResponse = async (text, audioUri, responseLanguage) => {
     setCallState('speaking')
     setTranscripts((prev) => [...prev, { role: 'bot', text }])
+
+    // Synchronously update language state & ref if backend dynamically switched it
+    if (responseLanguage && responseLanguage !== language) {
+      setLanguage(responseLanguage)
+      languageRef.current = responseLanguage
+    }
 
     // We cannot listen while the bot is speaking, otherwise the laptop microphone 
     // will pick up the bot's own voice from the speakers and interrupt itself!
@@ -293,7 +313,7 @@ export default function RealTimeCall() {
       if (audioUri && audioUri.startsWith('data:')) {
         await speakAudioUriPromise(audioUri)
       } else {
-        await speakTextWithBackendPromise(text, language)
+        await speakTextWithBackendPromise(text, responseLanguage || language)
       }
     } else {
       await new Promise((r) => setTimeout(r, Math.max(1500, text.length * 50)))
@@ -416,66 +436,6 @@ export default function RealTimeCall() {
           <div ref={transcriptsEndRef} />
         </div>
 
-        {/* Keyboard Input Fallback (Allows typing responses if SpeechRecognition is blocked/failing) */}
-        {(callState === 'listening' || callState === 'speaking' || callState === 'processing') && (
-          <form 
-            onSubmit={(e) => {
-              e.preventDefault();
-              const text = e.target.elements.chatInput.value.trim();
-              if (text) {
-                e.target.elements.chatInput.value = '';
-                cancelActiveAudio(); // interrupt bot if typing
-                stopRecognition();
-                setCallState('processing');
-                setTranscripts((prev) => [...prev, { role: 'user', text }]);
-                handleBotTurn(text);
-              }
-            }}
-            className="rtc__text-input-form glass"
-            style={{
-              display: 'flex',
-              gap: '0.5rem',
-              width: '100%',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '30px',
-              padding: '0.4rem 0.6rem 0.4rem 1.2rem',
-              backdropFilter: 'blur(10px)',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
-            }}
-          >
-            <input
-              name="chatInput"
-              type="text"
-              placeholder="Or type your response here..."
-              style={{
-                flex: 1,
-                background: 'transparent',
-                border: 'none',
-                color: '#fff',
-                fontSize: '0.85rem',
-                outline: 'none',
-              }}
-              autoComplete="off"
-            />
-            <button 
-              type="submit" 
-              style={{
-                background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
-                border: 'none',
-                color: '#fff',
-                padding: '0.4rem 1.1rem',
-                borderRadius: '20px',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(124, 58, 237, 0.3)',
-              }}
-            >
-              Send
-            </button>
-          </form>
-        )}
       </div>
 
       {/* Controls — only 3 buttons: Mute, Call/Hangup, Speaker */}
@@ -533,18 +493,12 @@ export default function RealTimeCall() {
 
         {/* Minimal settings — just language */}
         <div className="rtc__settings-bar">
-          <label>
+          <div>
             Language:{' '}
-            <select
-              className="rtc__select"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              disabled={callState !== 'idle' && callState !== 'ended'}
-            >
-              <option value="en">English (en-IN)</option>
-              <option value="ml">Malayalam (ml-IN)</option>
-            </select>
-          </label>
+            <span style={{ color: '#fff', fontWeight: 500 }}>
+              🤖 Bilingual Auto-Detect
+            </span>
+          </div>
           <div style={{ width: '1px', height: '12px', background: 'rgba(255,255,255,0.1)' }} />
           <div>
             Voice:{' '}
@@ -554,6 +508,8 @@ export default function RealTimeCall() {
           </div>
         </div>
       </div>
+      {/* ElevenLabs Conversational AI Widget */}
+      <elevenlabs-convai agent-id="agent_4801kvf11f4gewwt3mg7pphze2mt"></elevenlabs-convai>
     </div>
   )
 }

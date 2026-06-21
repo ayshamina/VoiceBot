@@ -43,17 +43,132 @@ def _get_initial_session() -> Dict[str, Any]:
     }
 
 
-def _resolve_language(session: Dict[str, Any], preferred: Optional[str], raw_text: str) -> str:
-    # Explicit language param from frontend selector ALWAYS wins — even overrides stored session
-    if preferred in ("en", "ml"):
-        session["language"] = preferred
-    # Auto-detect from Malayalam Unicode script only when no explicit preference was sent
-    elif _contains_malayalam(raw_text):
+async def _resolve_language_llm(raw_text: str, current_lang: str) -> Optional[str]:
+    from app.core.config import settings
+    if not settings.openai_configured:
+        return None
+
+    text_stripped = raw_text.strip()
+    if not text_stripped or text_stripped == "__START__" or len(text_stripped.split()) < 2:
+        return None
+
+    if bool(re.search(r"[\u0d00-\u0d7f]", text_stripped)):
+        return "ml"
+
+    system_prompt = (
+        "You are a language detection assistant.\n"
+        "Analyze the following transcribed text from a student phone call.\n"
+        "Determine whether the speaker is speaking in English or Malayalam (including Malayalam written in Malayalam script, transliterated Malayalam, or Manglish using English alphabet).\n"
+        "Respond with ONLY \"en\" (for English) or \"ml\" (for Malayalam). Do not output any other text or explanation.\n"
+        f"If the text is neutral (e.g., simple greeting, hello, yes, ok, no) and could be either, default to: {current_lang}"
+    )
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            headers = {
+                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": settings.OPENAI_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"User text: \"{text_stripped}\""}
+                ],
+                "max_tokens": 10,
+                "temperature": 0.0,
+            }
+            response = await client.post(
+                f"{settings.OPENAI_API_BASE}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            res_json = response.json()
+            detected = res_json["choices"][0]["message"]["content"].strip().lower()
+            if detected in ("en", "ml"):
+                return detected
+    except Exception as e:
+        print(f"[LanguageDetect] LLM detection failed: {e}")
+    return None
+async def _resolve_language(session: Dict[str, Any], preferred: Optional[str], raw_text: str, db: Session) -> str:
+    text_lower = raw_text.lower().strip()
+
+    # 1. Check for explicit bilingual switch commands (English, Malayalam script, and Malayalam transliterated)
+    ml_switch_triggers = [
+        "speak in malayalam", "talk in malayalam", "switch to malayalam", "change to malayalam",
+        "speak malayalam", "talk malayalam", "malayalathil samsarikkoo", "malayalam samsarikkoo",
+        "malayalam mathi", "malayalathil aakku", "malayalathil parayoo", "malayalam parayoo",
+        "മലയാളത്തിൽ സംസാരിക്കൂ", "മലയാളം സംസാരിക്കൂ", "മലയാളം മതി", "മലയാളത്തിൽ ആക്കൂ",
+        "മലയാളത്തിൽ പറയൂ", "മലയാളത്തിൽ സംസാരിക്കാമോ", "മലയാളത്തിൽ സംസാരിക്കുക"
+    ]
+
+    en_switch_triggers = [
+        "speak in english", "talk in english", "switch to english", "change to english",
+        "speak english", "talk english", "englishil samsarikkoo", "english samsarikkoo",
+        "english mathi", "englishil aakku", "englishil parayoo", "english parayoo",
+        "ഇംഗ്ലീഷിൽ സംസാരിക്കൂ", "ഇംഗ്ലീഷ് സംസാരിക്കൂ", "ഇംഗ്ലീഷ് മതി", "ഇംഗ്ലീഷിൽ ആക്കൂ",
+        "ഇംഗ്ലീഷിൽ പറയൂ", "ഇംഗ്ലീഷിൽ സംസാരിക്കാമോ", "ഇംഗ്ലീഷ് സംസാരിക്കുക"
+    ]
+
+    # Check for direct matches in the text
+    for trigger in ml_switch_triggers:
+        if trigger in text_lower:
+            session["language"] = "ml"
+            return "ml"
+
+    for trigger in en_switch_triggers:
+        if trigger in text_lower:
+            session["language"] = "en"
+            return "en"
+
+    # 2. Check for Malayalam Unicode script (character-based detection)
+    if _contains_malayalam(raw_text):
         session["language"] = "ml"
-    # If neither, keep existing session language (or default to English)
-    elif "language" not in session:
-        session["language"] = "en"
+        return "ml"
+
+    # 3. Call OpenAI LLM for natural language detection (if configured)
+    current_lang = session.get("language") or preferred or "en"
+    detected_lang = await _resolve_language_llm(raw_text, current_lang)
+    if detected_lang:
+        session["language"] = detected_lang
+        return detected_lang
+
+    # 4. Fallback: Check for common Malayalam transliterated words (transliterated Malayalam detection)
+    ml_transliterated_words = {
+        "ethra", "ethraya", "sukhamaano", "nandi", "athe", "aam", "alla", "sari", 
+        "parayu", "samsarikk", "chettan", "chechi", "evide", "eppo", "eppol", 
+        "engane", "entha", "enthann", "nokkanam", "parayam", "chodikkam", "nannayi",
+        "kurs", "feesu", "paisa", "chodhyam", "manassilayi"
+    }
+
+    words = set(re.findall(r"\w+", text_lower))
+    if words.intersection(ml_transliterated_words):
+        session["language"] = "ml"
+        return "ml"
+
+    # 5. Fallback: If the text is purely Latin/English alphabet (no Malayalam script characters),
+    # has no transliterated Malayalam words, and is in Malayalam session, switch to English.
+    if session.get("language") == "ml" and not _contains_malayalam(raw_text):
+        if not words.intersection(ml_transliterated_words) and len(words) >= 1:
+            session["language"] = "en"
+            return "en"
+
+    # 6. Fallback: If current session is Malayalam, but the query is clearly a longer English question, switch back to English
+    en_helper_words = {"what", "why", "how", "where", "when", "who", "which", "is", "are", "do", "does", "did", "can", "could", "should", "would", "please", "course", "fees", "placement", "admissions", "syllabus"}
+    if session.get("language") == "ml" and len(words) >= 3:
+        if words.intersection(en_helper_words):
+            session["language"] = "en"
+            return "en"
+
+    # 7. Default/Fallback: If none of the switch indicators matched, keep the session language if set,
+    # otherwise fall back to the frontend's preferred language, and if that's not set, default to English.
+    if "language" not in session:
+        session["language"] = preferred if preferred in ("en", "ml") else "en"
+
     return session["language"]
+
 
 
 def _greeting_text(language: str, db: Session) -> str:
@@ -332,7 +447,7 @@ async def chat(payload: ChatPayload, db: Session = Depends(get_db)):
     if payload.caller_number:
         session["caller_number"] = payload.caller_number
         
-    _resolve_language(session, payload.language, raw_text)
+    await _resolve_language(session, payload.language, raw_text, db)
     
     if "long_term_memory" not in session and session.get("caller_number"):
         _initialize_long_term_memory(session, db)

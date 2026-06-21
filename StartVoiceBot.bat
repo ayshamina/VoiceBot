@@ -16,6 +16,6 @@ rem Give the servers a moment to start
 ping -n 6 127.0.0.1 > nul
 
 rem ── Open the UI in the default browser ─────────────────
-start "" "http://127.0.0.1:5173/telephony"
+start "" "http://127.0.0.1:5174/telephony"
 
 exit
