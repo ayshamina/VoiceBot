@@ -93,6 +93,11 @@ async def _resolve_language_llm(raw_text: str, current_lang: str) -> Optional[st
         print(f"[LanguageDetect] LLM detection failed: {e}")
     return None
 async def _resolve_language(session: Dict[str, Any], preferred: Optional[str], raw_text: str, db: Session) -> str:
+    # If a specific language is preferred/selected (not "auto"), lock it and bypass detection
+    if preferred in ("en", "ml"):
+        session["language"] = preferred
+        return preferred
+
     text_lower = raw_text.lower().strip()
 
     # 1. Check for explicit bilingual switch commands (English, Malayalam script, and Malayalam transliterated)

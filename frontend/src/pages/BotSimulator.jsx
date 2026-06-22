@@ -59,11 +59,10 @@ export default function BotSimulator() {
     setStatus('pending')
     setError(null)
     try {
-      const resolvedLang = langMode === 'auto' ? 'en' : langMode
-      const res = await chatBot({ text: '__START__', session_id: session, language: resolvedLang })
+      const res = await chatBot({ text: '__START__', session_id: session, language: langMode })
       setStarted(true)
       appendMessage('bot', res.response_text)
-      const nextLang = res.language || resolvedLang
+      const nextLang = res.language || (langMode === 'auto' ? 'en' : langMode)
       setBotLanguage(nextLang)
       if (isSpeakerOn) speakTextWithBackendPromise(res.response_text, nextLang)
     } catch (err) {
@@ -149,11 +148,10 @@ export default function BotSimulator() {
     setStatus('pending')
     setError(null)
     try {
-      const resolvedLang = languageMode === 'auto' ? botLanguage : languageMode
-      const res = await chatBot({ text: userText, session_id: sessionId, language: resolvedLang })
+      const res = await chatBot({ text: userText, session_id: sessionId, language: languageMode })
       appendMessage('bot', res.response_text)
       if (res.lead_id) setLeadId(res.lead_id)
-      const nextLang = res.language || resolvedLang
+      const nextLang = res.language || (languageMode === 'auto' ? botLanguage : languageMode)
       setBotLanguage(nextLang)
       if (isSpeakerOn) speakTextWithBackendPromise(res.response_text, nextLang)
     } catch (err) {
