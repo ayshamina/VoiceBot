@@ -270,6 +270,17 @@
   animation: orb-float 5s ease-in-out infinite, orb-glow 5s ease-in-out infinite;
 }
 
+.rtc__orb--clickable {
+  cursor: pointer !important;
+}
+.rtc__orb--clickable:hover {
+  transform: scale(1.08) rotate(5deg) translateY(-5px);
+  filter: brightness(1.2);
+}
+.rtc__orb--clickable:active {
+  transform: scale(0.96);
+}
+
 /* AI face in the orb */
 .rtc__orb::before {
   content: '';

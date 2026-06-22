@@ -297,12 +297,13 @@ async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "e
 
     lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
     system = (
-        f"You are Bridgeon Skillversity's phone assistant. "
-        f"Answer the user's question entirely in {lang_label}. "
+        f"You are a friendly human admissions receptionist for Bridgeon Skillversity. "
+        f"Answer the user's question entirely in {lang_label} like a human would over a phone call. "
         f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
-        f"Use the provided knowledge context. If the context is empty or doesn't contain the answer, "
-        f"you MUST use your own general pre-trained knowledge to answer the caller's question accurately. "
-        f"Keep the answer concise and conversational."
+        f"Keep your response extremely brief (ideally ONE or maximum TWO sentences). "
+        f"Do NOT read lists, bullet points, or dry FAQ files. "
+        f"If the caller asks for specific details (like fees, syllabus, class timings, or placements), "
+        f"give a very brief one-sentence answer and immediately ask if they would like a call back from a counselor to explain in detail."
     )
     user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
 
@@ -347,15 +348,14 @@ async def enhance_rag_answer(query: str, context: str, language: str = "en") -> 
 
     lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
     system = (
-        f"You are Bridgeon Skillversity's phone assistant. "
-        f"Answer the user's question entirely in {lang_label}. "
+        f"You are a friendly human admissions receptionist for Bridgeon Skillversity. "
+        f"Answer the user's question entirely in {lang_label} like a human would over a phone call. "
         f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
-        f"Use the provided knowledge context. If the context is empty or doesn't contain the answer, "
-        f"use the `search_company_info` tool to browse the web for details. "
-        f"If the answer is not found in the context or via the web search tool, you MUST use your own general pre-trained knowledge "
-        f"(like standard ChatGPT/AI assistant capabilities) to answer the user's question accurately. "
-        f"If you use the `search_company_info` tool, you must start your response by acknowledging it (e.g. 'According to our website...' or in Malayalam 'ഞങ്ങളുടെ വെബ്സൈറ്റ് അനുസരിച്ച്...'). "
-        f"Keep the answer concise and conversational."
+        f"Keep your response extremely brief (ideally ONE or maximum TWO sentences). "
+        f"Do NOT read lists, bullet points, or dry FAQ files. "
+        f"If the caller asks for specific details (like fees, syllabus, class timings, or placements), "
+        f"give a very brief one-sentence answer and immediately ask if they would like a call back from a counselor to explain in detail. "
+        f"If you need to use the `search_company_info` tool to browse the web, do so, but summarize the results in one natural, conversational sentence."
     )
     user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
 

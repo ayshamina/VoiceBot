@@ -284,6 +284,9 @@ export default function RealTimeCall() {
       languageRef.current = responseLanguage
     }
 
+    // Start recognition immediately to listen for user interruption / barge-in
+    startRecognition()
+
     if (isSpeakerOn) {
       if (audioUri && audioUri.startsWith('data:')) {
         await speakAudioUriPromise(audioUri)
@@ -294,9 +297,11 @@ export default function RealTimeCall() {
       await new Promise((r) => setTimeout(r, Math.max(1500, text.length * 50)))
     }
 
-    await new Promise(resolve => setTimeout(resolve, 0))
-    setCallState('listening')
-    startRecognition()
+    // If the session was not interrupted and is still in speaking state, return to listening
+    if (stateRef.current === 'speaking') {
+      setCallState('listening')
+      startRecognition()
+    }
   }
 
   const hangUp = () => {
@@ -369,7 +374,18 @@ export default function RealTimeCall() {
                 <div className="rtc__orb-pulse rtc__orb-pulse--2" />
               </>
             )}
-            <div className="rtc__orb">
+            <div 
+              className={`rtc__orb ${callState === 'speaking' ? 'rtc__orb--clickable' : ''}`}
+              onClick={() => {
+                if (callState === 'speaking') {
+                  console.log('[RTC] Manual interrupt via Orb click')
+                  cancelActiveAudio()
+                  setCallState('listening')
+                  startRecognition()
+                }
+              }}
+              title={callState === 'speaking' ? 'Click to interrupt bot' : ''}
+            >
               <span className="rtc__orb-emoji">
                 {callState === 'idle' && '📞'}
                 {callState === 'ringing' && '📞'}
