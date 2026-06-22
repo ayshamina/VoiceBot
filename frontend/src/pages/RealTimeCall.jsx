@@ -178,11 +178,11 @@ export default function RealTimeCall() {
           const botText = botSpokenTextRef.current || ''
           
           // Prevent bot from cutting off due to speaker echo of its own voice
-          const heardWords = heard.split(/\s+/).filter(w => w.length > 2)
+          const heardWords = heard.split(/[^a-zA-Z\u0d00-\u0d7f]+/).filter(w => w.length > 2)
           let isEcho = false
           if (heardWords.length > 0) {
             const matches = heardWords.filter(w => botText.includes(w))
-            if (botText.includes(heard) || (matches.length / heardWords.length) > 0.6) {
+            if (botText.includes(heard) || (matches.length / heardWords.length) >= 0.4) {
               isEcho = true
             }
           }
@@ -191,6 +191,7 @@ export default function RealTimeCall() {
             console.log('[RTC] Auto-interrupted bot speech with heard text:', activeText)
             cancelActiveAudio()
             setCallState('listening')
+            return // Stop execution; let user finish their sentence in listening state
           } else if (isEcho) {
             console.log('[RTC] Ignored echo of bot speech:', activeText)
             return // Skip processing this speech result
@@ -465,6 +466,12 @@ export default function RealTimeCall() {
             {error && (
               <div className="bot-sim__error" style={{ marginBottom: '1rem', width: '100%' }}>
                 <strong>Notice:</strong> {error}
+              </div>
+            )}
+
+            {(callState === 'connected' || callState === 'speaking' || callState === 'listening') && (
+              <div style={{ fontSize: '0.78rem', color: '#64748b', textAlign: 'center', marginBottom: '0.8rem', width: '100%', opacity: 0.85 }}>
+                🎧 <i>Tip: Use headphones to get the best voice interruption experience.</i>
               </div>
             )}
 
