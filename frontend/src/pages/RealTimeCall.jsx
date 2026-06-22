@@ -39,6 +39,7 @@ export default function RealTimeCall() {
   const isListeningRef = useRef(false)
   const languageRef = useRef(language)
   const sessionIdRef = useRef(sessionId)
+  const botSpokenTextRef = useRef('')
 
   useEffect(() => { languageRef.current = language }, [language])
   useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
@@ -149,11 +150,6 @@ export default function RealTimeCall() {
 
       rec.onspeechstart = () => {
         console.log('[RTC] onspeechstart, state:', stateRef.current)
-        if (stateRef.current === 'speaking') {
-          console.log('[RTC] Barge-in! Cancelling bot audio.')
-          cancelActiveAudio()
-          setCallState('listening')
-        }
       }
 
       rec.onresult = async (event) => {
@@ -171,11 +167,38 @@ export default function RealTimeCall() {
         setInterimTranscript(interimStr)
 
         const text = finalStr.trim()
-        if (!text) return
+        const interimText = interimStr.trim()
+        const activeText = text || interimText
+        
+        if (!activeText) return
 
+        // Auto-interruption logic: check if user spoke actual words while bot is talking
         if (stateRef.current === 'speaking') {
-          cancelActiveAudio()
+          const heard = activeText.toLowerCase()
+          const botText = botSpokenTextRef.current || ''
+          
+          // Prevent bot from cutting off due to speaker echo of its own voice
+          const heardWords = heard.split(/\s+/).filter(w => w.length > 2)
+          let isEcho = false
+          if (heardWords.length > 0) {
+            const matches = heardWords.filter(w => botText.includes(w))
+            if (botText.includes(heard) || (matches.length / heardWords.length) > 0.6) {
+              isEcho = true
+            }
+          }
+
+          if (activeText.length > 2 && !isEcho) {
+            console.log('[RTC] Auto-interrupted bot speech with heard text:', activeText)
+            cancelActiveAudio()
+            setCallState('listening')
+          } else if (isEcho) {
+            console.log('[RTC] Ignored echo of bot speech:', activeText)
+            return // Skip processing this speech result
+          }
         }
+
+        // Only process final transcriptions
+        if (!text) return
 
         console.log('[RTC] User said:', text)
         setInterimTranscript('')
@@ -277,12 +300,16 @@ export default function RealTimeCall() {
 
   const playBotResponse = async (text, audioUri, responseLanguage) => {
     setCallState('speaking')
+    botSpokenTextRef.current = text.toLowerCase()
     setTranscripts((prev) => [...prev, { role: 'bot', text }])
 
     if (responseLanguage && responseLanguage !== language) {
       setLanguage(responseLanguage)
       languageRef.current = responseLanguage
     }
+
+    // Start recognition immediately to listen for user interruption / barge-in
+    startRecognition()
 
     if (isSpeakerOn) {
       if (audioUri && audioUri.startsWith('data:')) {
