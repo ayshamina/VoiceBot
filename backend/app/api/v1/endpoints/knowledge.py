@@ -199,6 +199,7 @@ async def upload_pdf(
             shutil.copyfileobj(file.file, buffer)
             
         # Call the ingest PDF service
+        from app.services.pdf_ingest import ingest_pdf
         ingest_pdf(temp_file_path)
         
         # Record event
@@ -215,6 +216,33 @@ async def upload_pdf(
                 os.remove(temp_file_path)
             except Exception:
                 pass
+
+
+class URLIngestPayload(BaseModel):
+    url: str = Field(..., description="Website or webpage URL to scrape and ingest", example="https://bridgeon.in/about")
+
+
+@router.post("/upload-url", summary="Upload a Web URL to knowledge base")
+async def upload_url(
+    payload: URLIngestPayload,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_admin)
+):
+    """Ingest webpage text content from a public URL into the vector database."""
+    url = payload.url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid URL format. Must start with http:// or https://")
+    
+    try:
+        from app.services.url_ingest import ingest_url
+        await ingest_url(url)
+        
+        # Record event
+        record_event("url_uploaded", "knowledge", 0, db)
+        
+        return {"status": "success", "message": f"Successfully ingested web content from {url}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process URL: {str(e)}")
 
 
 

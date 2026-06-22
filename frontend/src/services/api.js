@@ -175,6 +175,12 @@ export const uploadPDF = async (file) => {
   return res.json()
 }
 
+/** POST /api/v1/knowledge/upload-url — ingest a Web URL */
+export const uploadURL = async (url) => request('/knowledge/upload-url', {
+  method: 'POST',
+  body: JSON.stringify({ url }),
+}, { auth: true })
+
 // ── Leads ──────────────────────────────────────────────────────────────────
 /** GET /api/v1/leads — list captured leads */
 export const getLeads = () => request('/leads', {}, { auth: true })

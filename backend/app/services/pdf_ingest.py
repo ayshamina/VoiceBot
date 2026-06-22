@@ -11,8 +11,6 @@ def ingest_pdf(file_path: str, collection_name: str = "bridgeon_docs") -> None:
     """
     try:
         from langchain_text_splitters import RecursiveCharacterTextSplitter
-        from langchain_openai import OpenAIEmbeddings
-        from langchain_community.embeddings import HuggingFaceEmbeddings
         from langchain_community.vectorstores import Chroma
     except ImportError:
         raise ImportError(
@@ -37,8 +35,10 @@ def ingest_pdf(file_path: str, collection_name: str = "bridgeon_docs") -> None:
 
     # 3️⃣ Choose embedding backend (free local HuggingFace by default)
     if os.getenv("USE_OPENAI_EMBEDDINGS", "").lower() == "true" and os.getenv("OPENAI_API_KEY"):
+        from langchain_openai import OpenAIEmbeddings
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
     else:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     # 4️⃣ Persist to Chroma (creates/opens the collection)

@@ -27,21 +27,21 @@ const initialMessages = [{ id: 'intro', role: 'system', text: 'Starting bot sess
 
 export default function BotSimulator() {
   const { error: healthError } = useHealth()
-  const [sessionId, setSessionId]     = useState(() => createSessionId())
-  const [messages, setMessages]       = useState(initialMessages)
-  const [input, setInput]             = useState('')
-  const [status, setStatus]           = useState('pending')
-  const [error, setError]             = useState(null)
-  const [started, setStarted]         = useState(false)
-  const [leadId, setLeadId]           = useState(null)
+  const [sessionId, setSessionId] = useState(() => createSessionId())
+  const [messages, setMessages] = useState(initialMessages)
+  const [input, setInput] = useState('')
+  const [status, setStatus] = useState('pending')
+  const [error, setError] = useState(null)
+  const [started, setStarted] = useState(false)
+  const [leadId, setLeadId] = useState(null)
   const [languageMode, setLanguageMode] = useState('auto')
   const [botLanguage, setBotLanguage] = useState('en')
   const [isListening, setIsListening] = useState(false)
   const [isSpeakerOn, setIsSpeakerOn] = useState(true)
-  const chatEndRef   = useRef(null)
-  const startedRef   = useRef(false)
+  const chatEndRef = useRef(null)
+  const startedRef = useRef(false)
   const recognitionRef = useRef(null)
-  const langInitRef  = useRef(false)
+  const langInitRef = useRef(false)
 
   const lastBotMessage = useMemo(
     () => messages.filter(m => m.role === 'bot').slice(-1)[0],
@@ -77,7 +77,7 @@ export default function BotSimulator() {
   useEffect(() => {
     getVoiceStatus().catch(() => null)
     return () => {
-      if (recognitionRef.current) { try { recognitionRef.current.abort() } catch (e) {} }
+      if (recognitionRef.current) { try { recognitionRef.current.abort() } catch (e) { } }
       cancelActiveAudio()
     }
   }, [])
@@ -111,7 +111,7 @@ export default function BotSimulator() {
     setError(null)
     const lang = languageMode === 'auto' ? 'ml' : languageMode
     if (isListening) {
-      if (recognitionRef.current) { try { recognitionRef.current.abort() } catch (e) {} ; recognitionRef.current = null }
+      if (recognitionRef.current) { try { recognitionRef.current.abort() } catch (e) { }; recognitionRef.current = null }
       setIsListening(false)
       return
     }

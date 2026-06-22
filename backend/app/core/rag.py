@@ -10,9 +10,16 @@ from sqlalchemy.orm import Session
 from app.core.models import Knowledge
 
 
+_STOP_WORDS = {
+    "what", "is", "a", "an", "the", "of", "in", "on", "at", "for", "to", "with", 
+    "and", "or", "it", "this", "that", "these", "those", "your", "my", "me", "i", 
+    "you", "we", "they", "he", "she", "do", "does", "did", "are", "was", "were", "be", "been"
+}
+
 def _tokenize(text: str) -> List[str]:
-    """Tokenize text into lowercase words."""
-    return [token for token in re.findall(r"\w+", text.lower()) if token]
+    """Tokenize text into lowercase words, filtering out common stop words."""
+    tokens = [token for token in re.findall(r"\w+", text.lower()) if token]
+    return [t for t in tokens if t not in _STOP_WORDS]
 
 
 def _vectorize(text: str) -> Dict[str, int]:
@@ -167,6 +174,12 @@ async def retrieve_grounded_answer_async(
 
     from app.core.config import settings
     from app.services.voice import enhance_rag_answer, sarvam_enhance_rag_answer
+
+    # If context is empty, only proceed if LLMs are configured. Otherwise exit.
+    if not context or not context.strip():
+        if not (settings.openai_configured or settings.sarvam_configured):
+            return ""
+        context = ""
 
     # 1. Try OpenAI RAG enhancement first
     if settings.openai_configured:

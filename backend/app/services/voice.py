@@ -264,16 +264,28 @@ async def synthesize_speech(text: str, language: str = "en") -> Optional[bytes]:
 
 
 def search_company_info(search_query: str) -> str:
-    """Search DuckDuckGo for the company."""
+    """Search DuckDuckGo for general queries or falling back to the company."""
     try:
         from duckduckgo_search import DDGS
-        results = DDGS().text(f"Bridgeon Skillversity {search_query}", max_results=3)
+        query = search_query.strip()
+        
+        # Try searching generally first
+        results = DDGS().text(query, max_results=3)
+        
+        # Fallback to company context search if no results and query is specific
+        if not results and "bridgeon" not in query.lower() and "skillversity" not in query.lower():
+            results = DDGS().text(f"Bridgeon Skillversity {query}", max_results=3)
+            
         if not results:
             return "No results found on the web."
         
         snippets = []
         for r in results:
-            snippets.append(f"Title: {r.get('title')}\nSnippet: {r.get('body')}\n")
+            title = r.get('title')
+            body = r.get('body')
+            href = r.get('href') or r.get('url') or ""
+            source_info = f" (Source: {href})" if href else ""
+            snippets.append(f"Title: {title}\nSnippet: {body}{source_info}\n")
         return "\n".join(snippets)
     except Exception as e:
         return f"Error searching the web: {str(e)}"
@@ -288,7 +300,8 @@ async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "e
         f"You are Bridgeon Skillversity's phone assistant. "
         f"Answer the user's question entirely in {lang_label}. "
         f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
-        f"Use the provided knowledge context. "
+        f"Use the provided knowledge context. If the context is empty or doesn't contain the answer, "
+        f"you MUST use your own general pre-trained knowledge to answer the caller's question accurately. "
         f"Keep the answer concise and conversational."
     )
     user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
@@ -315,7 +328,16 @@ async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "e
         )
         response.raise_for_status()
         resp_json = response.json()
-        return resp_json["choices"][0]["message"]["content"].strip()
+        message = resp_json["choices"][0]["message"]
+        content = message.get("content")
+        if content:
+            return content.strip()
+        
+        reasoning = message.get("reasoning_content")
+        if reasoning:
+            return reasoning.strip()
+            
+        return None
 
 
 async def enhance_rag_answer(query: str, context: str, language: str = "en") -> str:
@@ -330,6 +352,8 @@ async def enhance_rag_answer(query: str, context: str, language: str = "en") -> 
         f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
         f"Use the provided knowledge context. If the context is empty or doesn't contain the answer, "
         f"use the `search_company_info` tool to browse the web for details. "
+        f"If the answer is not found in the context or via the web search tool, you MUST use your own general pre-trained knowledge "
+        f"(like standard ChatGPT/AI assistant capabilities) to answer the user's question accurately. "
         f"If you use the `search_company_info` tool, you must start your response by acknowledging it (e.g. 'According to our website...' or in Malayalam 'ഞങ്ങളുടെ വെബ്സൈറ്റ് അനുസരിച്ച്...'). "
         f"Keep the answer concise and conversational."
     )

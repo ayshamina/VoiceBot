@@ -1,6 +1,15 @@
 """
 Basic API tests for production readiness (Phase 12).
 """
+import os
+# Force empty API keys for unit testing to prevent live API calls and timeouts
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["SARVAM_API_KEY"] = ""
+os.environ["ELEVENLABS_API_KEY"] = ""
+os.environ["EXOTEL_API_KEY"] = ""
+os.environ["EXOTEL_API_TOKEN"] = ""
+os.environ["EXOTEL_ACCOUNT_SID"] = ""
+
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 
@@ -8,6 +17,12 @@ from app.core.auth import issue_admin_token
 from main import app
 
 client = TestClient(app)
+
+# Mock vector store queries to prevent loading HuggingFace embedding models
+from unittest.mock import MagicMock
+import app.core.vectorstore
+app.core.vectorstore.query_documents = MagicMock(return_value=[])
+
 
 
 def test_health_endpoint():
@@ -292,6 +307,38 @@ def test_bot_adaptive_intent_switching(mock_search):
     assert "placement" in data["response_text"].lower() or "salary" in data["response_text"].lower()
     assert "may I know your name" in data["response_text"]
     assert data["state"] == "lead_capture_name"
+
+
+def test_upload_url_requires_auth():
+    response = client.post("/api/v1/knowledge/upload-url", json={"url": "https://bridgeon.in"})
+    assert response.status_code == 401
+
+
+@patch("app.services.url_ingest.ingest_url")
+def test_upload_url_authorized_success(mock_ingest_url):
+    mock_ingest_url.return_value = None
+    token = issue_admin_token("admin")
+    response = client.post(
+        "/api/v1/knowledge/upload-url",
+        json={"url": "https://bridgeon.in/about"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert "Successfully ingested" in response.json()["message"]
+
+
+@patch("duckduckgo_search.DDGS.text")
+def test_search_company_info_general(mock_ddgs_text):
+    mock_ddgs_text.return_value = [
+        {"title": "What is React?", "body": "React is a JavaScript library for building user interfaces.", "href": "https://react.dev"}
+    ]
+    from app.services.voice import search_company_info
+    res = search_company_info("React library")
+    assert "What is React?" in res
+    assert "React is a JavaScript library" in res
+    assert "https://react.dev" in res
+
 
 
 

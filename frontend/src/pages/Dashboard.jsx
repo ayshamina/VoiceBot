@@ -12,6 +12,7 @@ import {
   updateKnowledgeEntry,
   deleteKnowledgeEntry,
   uploadPDF,
+  uploadURL,
   deleteKnowledgeGap,
   getLeads,
   deleteLead,
@@ -71,6 +72,11 @@ export default function Dashboard() {
   const [pdfFile, setPdfFile] = useState(null)
   const [pdfUploadStatus, setPdfUploadStatus] = useState(null) // null | 'uploading' | 'success' | 'error'
   const [pdfUploadMessage, setPdfUploadMessage] = useState('')
+
+  const [ingestType, setIngestType] = useState('pdf') // 'pdf' | 'url'
+  const [urlInput, setUrlInput] = useState('')
+  const [urlIngestStatus, setUrlIngestStatus] = useState(null) // null | 'ingesting' | 'success' | 'error'
+  const [urlIngestMessage, setUrlIngestMessage] = useState('')
 
   // Phase 9 — full settings with office hours + escalation controls
   const [settings, setSettings] = useState({
@@ -391,6 +397,35 @@ export default function Dashboard() {
       console.error(err)
       setPdfUploadStatus('error')
       setPdfUploadMessage(err.message || 'Failed to upload PDF. Please check server logs.')
+    }
+  }
+
+  const handleUrlIngest = async (e) => {
+    e.preventDefault()
+    if (!urlInput.trim()) {
+      alert('Please enter a URL first.')
+      return
+    }
+    setUrlIngestStatus('ingesting')
+    setUrlIngestMessage('')
+    try {
+      const res = await uploadURL(urlInput.trim())
+      setUrlIngestStatus('success')
+      setUrlIngestMessage(res.message || 'Successfully ingested Web URL!')
+      setUrlInput('')
+      
+      // Reload knowledge entries
+      const knowledgeRes = await getKnowledgeEntries()
+      setKnowledgeEntries(knowledgeRes)
+      
+      setTimeout(() => {
+        setUrlIngestStatus(null)
+        setUrlIngestMessage('')
+      }, 5000)
+    } catch (err) {
+      console.error(err)
+      setUrlIngestStatus('error')
+      setUrlIngestMessage(err.message || 'Failed to ingest URL. Please check server logs.')
     }
   }
 
@@ -786,9 +821,7 @@ export default function Dashboard() {
 
           {/* External */}
           <span className="db__nav-section-label">Tools</span>
-          <Link to="/telephony" className="db__nav-btn db__nav-link">📞 Telephony Sim</Link>
-          <Link to="/bot" className="db__nav-btn db__nav-link">🎙️ Bot Simulator</Link>
-          <Link to="/call" className="db__nav-btn db__nav-link">🔴 Real-Time Call</Link>
+          <Link to="/" className="db__nav-btn db__nav-link">📞 AI Call Center</Link>
 
           <button onClick={handleLogout} className="db__nav-btn db__logout-btn">
             🚪 Logout
@@ -1061,7 +1094,7 @@ export default function Dashboard() {
                         </div>
                       ))}
                       {!analytics?.outcomes?.length && (
-                        <p className="form-helper">No call events yet. Use the bot or telephony simulator to generate live metrics.</p>
+                        <p className="form-helper">No call events yet. Start a Live AI Voice Call to generate metrics.</p>
                       )}
                     </div>
                   </div>
@@ -1320,72 +1353,160 @@ export default function Dashboard() {
                     </section>
                   </form>
 
-                  {/* Right: PDF Document Ingestion */}
+                  {/* Right: PDF/URL Document Ingestion */}
                   <div className="db__form-container">
                     <section className="glass db__form-section" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                       <div>
-                        <h3>Bulk Document Ingestion (PDF)</h3>
-                        <p className="form-helper" style={{ marginBottom: '1.5rem' }}>
-                          Upload bulk document entries like company brochures, course syllabus sheets, and refund policy guides. 
-                          The agentic RAG system will partition, chunk, embed, and query them.
-                        </p>
-                        
-                        <div className="pdf-upload-box" style={{ 
-                          border: '2px dashed var(--clr-border, #ccc)', 
-                          borderRadius: '8px', 
-                          padding: '2rem', 
-                          textAlign: 'center', 
-                          background: 'rgba(255, 255, 255, 0.03)',
-                          marginBottom: '1rem' 
-                        }}>
-                          <span style={{ fontSize: '3rem', display: 'block', marginBottom: '1rem' }}>📄</span>
-                          <label htmlFor="pdf-file-input" style={{ cursor: 'pointer', display: 'block', fontWeight: 'bold', marginBottom: '0.5rem' }}>
-                            {pdfFile ? pdfFile.name : 'Select a PDF Document'}
-                          </label>
-                          <p className="form-helper" style={{ margin: '0 0 1rem 0' }}>Maximum size: 10MB</p>
-                          <input 
-                            id="pdf-file-input" 
-                            type="file" 
-                            accept=".pdf" 
-                            style={{ display: 'none' }}
-                            onChange={(e) => setPdfFile(e.target.files[0])}
-                          />
-                          <button 
-                            type="button" 
-                            className="btn btn--ghost btn--sm" 
-                            onClick={() => document.getElementById('pdf-file-input').click()}
-                          >
-                            Browse Files
-                          </button>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <h3 style={{ margin: 0 }}>Online / Document Ingestion</h3>
+                          <div style={{ display: 'flex', gap: '0.25rem', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', padding: '0.25rem' }}>
+                            <button
+                              type="button"
+                              className={`btn btn--sm ${ingestType === 'pdf' ? 'btn--primary' : 'btn--ghost'}`}
+                              onClick={() => setIngestType('pdf')}
+                              style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem', minHeight: 'auto', height: 'auto' }}
+                            >
+                              📄 PDF
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn--sm ${ingestType === 'url' ? 'btn--primary' : 'btn--ghost'}`}
+                              onClick={() => setIngestType('url')}
+                              style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem', minHeight: 'auto', height: 'auto' }}
+                            >
+                              🌐 Web URL
+                            </button>
+                          </div>
                         </div>
 
-                        {pdfUploadStatus && (
-                          <div style={{
-                            padding: '1rem',
-                            borderRadius: '6px',
-                            background: pdfUploadStatus === 'success' ? 'rgba(76, 175, 80, 0.1)' : pdfUploadStatus === 'uploading' ? 'rgba(33, 150, 243, 0.1)' : 'rgba(244, 67, 54, 0.1)',
-                            border: `1px solid ${pdfUploadStatus === 'success' ? '#4caf50' : pdfUploadStatus === 'uploading' ? '#2196f3' : '#f44336'}`,
-                            color: pdfUploadStatus === 'success' ? '#4caf50' : pdfUploadStatus === 'uploading' ? '#2196f3' : '#f44336',
-                            marginBottom: '1rem',
-                            fontSize: '0.9rem'
-                          }}>
-                            {pdfUploadStatus === 'uploading' && '⏳ Ingesting PDF document, building semantic index...'}
-                            {pdfUploadStatus === 'success' && `✔ ${pdfUploadMessage}`}
-                            {pdfUploadStatus === 'error' && `✖ ${pdfUploadMessage}`}
-                          </div>
+                        {ingestType === 'pdf' ? (
+                          <>
+                            <p className="form-helper" style={{ marginBottom: '1.5rem' }}>
+                              Upload bulk document entries like company brochures, course syllabus sheets, and refund policy guides. 
+                              The agentic RAG system will partition, chunk, embed, and query them.
+                            </p>
+                            
+                            <div className="pdf-upload-box" style={{ 
+                              border: '2px dashed var(--clr-border, #ccc)', 
+                              borderRadius: '8px', 
+                              padding: '2rem', 
+                              textAlign: 'center', 
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              marginBottom: '1rem' 
+                            }}>
+                              <span style={{ fontSize: '3rem', display: 'block', marginBottom: '1rem' }}>📄</span>
+                              <label htmlFor="pdf-file-input" style={{ cursor: 'pointer', display: 'block', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+                                {pdfFile ? pdfFile.name : 'Select a PDF Document'}
+                              </label>
+                              <p className="form-helper" style={{ margin: '0 0 1rem 0' }}>Maximum size: 10MB</p>
+                              <input 
+                                id="pdf-file-input" 
+                                type="file" 
+                                accept=".pdf" 
+                                style={{ display: 'none' }}
+                                onChange={(e) => setPdfFile(e.target.files[0])}
+                              />
+                              <button 
+                                type="button" 
+                                className="btn btn--ghost btn--sm" 
+                                onClick={() => document.getElementById('pdf-file-input').click()}
+                              >
+                                Browse Files
+                              </button>
+                            </div>
+
+                            {pdfUploadStatus && (
+                              <div style={{
+                                padding: '1rem',
+                                borderRadius: '6px',
+                                background: pdfUploadStatus === 'success' ? 'rgba(76, 175, 80, 0.1)' : pdfUploadStatus === 'uploading' ? 'rgba(33, 150, 243, 0.1)' : 'rgba(244, 67, 54, 0.1)',
+                                border: `1px solid ${pdfUploadStatus === 'success' ? '#4caf50' : pdfUploadStatus === 'uploading' ? '#2196f3' : '#f44336'}`,
+                                color: pdfUploadStatus === 'success' ? '#4caf50' : pdfUploadStatus === 'uploading' ? '#2196f3' : '#f44336',
+                                marginBottom: '1rem',
+                                fontSize: '0.9rem'
+                              }}>
+                                {pdfUploadStatus === 'uploading' && '⏳ Ingesting PDF document, building semantic index...'}
+                                {pdfUploadStatus === 'success' && `✔ ${pdfUploadMessage}`}
+                                {pdfUploadStatus === 'error' && `✖ ${pdfUploadMessage}`}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <p className="form-helper" style={{ marginBottom: '1.5rem' }}>
+                              Provide a public website or webpage URL (e.g. course pages, FAQs, about page).
+                              The bot will fetch the page, scrape text, chunk, and index it into Chroma.
+                            </p>
+
+                            <div className="url-ingest-box" style={{
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid var(--clr-border, rgba(255,255,255,0.1))',
+                              borderRadius: '8px',
+                              padding: '1.5rem',
+                              marginBottom: '1rem'
+                            }}>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label htmlFor="url-input" style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.5rem' }}>Webpage URL</label>
+                                <input
+                                  id="url-input"
+                                  type="url"
+                                  placeholder="https://bridgeon.in/courses"
+                                  value={urlInput}
+                                  onChange={(e) => setUrlInput(e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '0.75rem',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--clr-border, rgba(255,255,255,0.15))',
+                                    background: 'rgba(0,0,0,0.2)',
+                                    color: '#fff',
+                                    fontSize: '0.95rem'
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {urlIngestStatus && (
+                              <div style={{
+                                padding: '1rem',
+                                borderRadius: '6px',
+                                background: urlIngestStatus === 'success' ? 'rgba(76, 175, 80, 0.1)' : urlIngestStatus === 'ingesting' ? 'rgba(33, 150, 243, 0.1)' : 'rgba(244, 67, 54, 0.1)',
+                                border: `1px solid ${urlIngestStatus === 'success' ? '#4caf50' : urlIngestStatus === 'ingesting' ? '#2196f3' : '#f44336'}`,
+                                color: urlIngestStatus === 'success' ? '#4caf50' : urlIngestStatus === 'ingesting' ? '#2196f3' : '#f44336',
+                                marginBottom: '1rem',
+                                fontSize: '0.9rem'
+                              }}>
+                                {urlIngestStatus === 'ingesting' && '⏳ Ingesting web content, parsing HTML and building index...'}
+                                {urlIngestStatus === 'success' && `✔ ${urlIngestMessage}`}
+                                {urlIngestStatus === 'error' && `✖ ${urlIngestMessage}`}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
 
                       <div className="form-actions" style={{ padding: 0, border: 'none' }}>
-                        <button 
-                          type="button" 
-                          className="btn btn--primary" 
-                          disabled={!pdfFile || pdfUploadStatus === 'uploading'}
-                          onClick={handlePdfUpload}
-                          style={{ width: '100%' }}
-                        >
-                          {pdfUploadStatus === 'uploading' ? 'Ingesting...' : 'Ingest Document'}
-                        </button>
+                        {ingestType === 'pdf' ? (
+                          <button 
+                            type="button" 
+                            className="btn btn--primary" 
+                            disabled={!pdfFile || pdfUploadStatus === 'uploading'}
+                            onClick={handlePdfUpload}
+                            style={{ width: '100%' }}
+                          >
+                            {pdfUploadStatus === 'uploading' ? 'Ingesting...' : 'Ingest Document'}
+                          </button>
+                        ) : (
+                          <button 
+                            type="button" 
+                            className="btn btn--primary" 
+                            disabled={!urlInput.trim() || urlIngestStatus === 'ingesting'}
+                            onClick={handleUrlIngest}
+                            style={{ width: '100%' }}
+                          >
+                            {urlIngestStatus === 'ingesting' ? 'Ingesting...' : 'Ingest URL'}
+                          </button>
+                        )}
                       </div>
                     </section>
                   </div>

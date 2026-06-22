@@ -123,10 +123,7 @@ export default function LandingPage() {
 
           <div className="lp__hero-cta">
             <Link to="/call" id="btn-realtime-call" className="btn btn--primary">
-              📞 Start Real-Time Call
-            </Link>
-            <Link to="/telephony" id="btn-telephony-sim" className="btn btn--ghost">
-              🎭 Simulate a Call
+              📞 AI Voice Calling (VoIP & Sim)
             </Link>
             <Link to="/bot" id="btn-simulate-bot" className="btn btn--ghost">
               💬 Try Chat Bot
@@ -272,8 +269,7 @@ export default function LandingPage() {
             <span>Bridgeon <span className="gradient-text">Buddy</span></span>
           </div>
           <div className="lp__footer-links">
-            <Link to="/call" className="lp__footer-link">📞 Real-Time Call</Link>
-            <Link to="/telephony" className="lp__footer-link">🎭 Telephony Sim</Link>
+            <Link to="/call" className="lp__footer-link">📞 AI Call Center</Link>
             <Link to="/bot" className="lp__footer-link">💬 Chat Bot</Link>
             <Link to="/admin" className="lp__footer-link">⚙️ Admin Panel</Link>
             <a href={API_DOCS_URL} className="lp__footer-link" target="_blank" rel="noopener noreferrer">📄 API Docs</a>

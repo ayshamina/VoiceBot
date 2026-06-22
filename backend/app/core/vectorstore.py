@@ -2,8 +2,6 @@ import os
 from pathlib import Path
 try:
     from langchain_community.vectorstores import Chroma
-    from langchain_openai import OpenAIEmbeddings
-    from langchain_community.embeddings import HuggingFaceEmbeddings
     _langchain_available = True
 except ImportError:
     _langchain_available = False
@@ -17,7 +15,9 @@ def get_embeddings():
     if not _langchain_available:
         return None
     if os.getenv("USE_OPENAI_EMBEDDINGS", "").lower() == "true" and os.getenv("OPENAI_API_KEY"):
+        from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings(model="text-embedding-3-large")
+    from langchain_community.embeddings import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 def get_vector_store():

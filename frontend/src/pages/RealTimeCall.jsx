@@ -11,7 +11,7 @@ import {
 import './RealTimeCall.css'
 
 export default function RealTimeCall() {
-  // ── State ──────────────────────────────────────────────────────────────────
+  // ── VoIP Call State ────────────────────────────────────────────────────
   const [micAuthorized, setMicAuthorized] = useState(false)
   const [callState, setCallState] = useState('idle') // idle | ringing | connected | speaking | listening | processing | ended
   const [duration, setDuration] = useState(0)
@@ -58,7 +58,7 @@ export default function RealTimeCall() {
       return true
     } catch (e) {
       console.warn('Microphone permission denied', e)
-      setError('Microphone permission is required for the call.')
+      setError('Microphone permission is required for browser calls.')
       setMicAuthorized(false)
       return false
     }
@@ -67,25 +67,14 @@ export default function RealTimeCall() {
   // Request mic on mount
   useEffect(() => { requestMicPermission() }, [])
 
-  // Load voice config on mount
+  // Load voice config and check recognition support on mount
   useEffect(() => {
     getVoiceStatus().then(setVoiceStatus).catch(() => setVoiceStatus(null))
+
     if (!isSpeechRecognitionSupported()) {
       setError('Your browser does not support speech recognition. Use Chrome or Edge.')
     }
     return () => { stopTimer(); stopRecognition() }
-  }, [])
-
-  // Load ElevenLabs Conversational AI Widget script
-  useEffect(() => {
-    const script = document.createElement('script')
-    script.src = 'https://elevenlabs.io/convai-widget/index.js'
-    script.async = true
-    script.type = 'text/javascript'
-    document.body.appendChild(script)
-    return () => {
-      document.body.removeChild(script)
-    }
   }, [])
 
   // Auto-scroll transcript
@@ -93,7 +82,7 @@ export default function RealTimeCall() {
     transcriptsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [transcripts])
 
-  // ── Timer ──────────────────────────────────────────────────────────────────
+  // ── VoIP Call Timer ─────────────────────────────────────────────────────────
   const startTimer = () => {
     stopTimer()
     setDuration(0)
@@ -108,7 +97,7 @@ export default function RealTimeCall() {
     return `${m}:${sec}`
   }
 
-  // ── Speech Recognition ─────────────────────────────────────────────────────
+  // ── VoIP Speech Recognition ────────────────────────────────────────────────
   const stopRecognition = () => {
     if (recognitionRef.current && isListeningRef.current) {
       try {
@@ -127,7 +116,6 @@ export default function RealTimeCall() {
       if (!ok) return
     }
 
-    // Ensure we have a single persistent SpeechRecognition instance
     if (!recognitionRef.current) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       if (!SpeechRecognition) {
@@ -214,11 +202,8 @@ export default function RealTimeCall() {
       recognitionRef.current = rec
     }
 
-    // Dynamically update the language lang code on the persistent instance
-    // Default to 'ml-IN' in auto mode to recognize Malayalam script (bilingual code-switching allows English Latin characters too)
     recognitionRef.current.lang = (languageRef.current === 'ml' || languageRef.current === 'auto') ? 'ml-IN' : 'en-IN'
 
-    // Start recognition only if it's not already active
     if (!isListeningRef.current) {
       try {
         recognitionRef.current.start()
@@ -229,7 +214,6 @@ export default function RealTimeCall() {
     }
   }
 
-  // ── Mute Toggle ────────────────────────────────────────────────────────────
   const toggleMute = () => {
     setIsMuted((prev) => {
       const newMuted = !prev
@@ -242,7 +226,7 @@ export default function RealTimeCall() {
     })
   }
 
-  // ── Call Flow ──────────────────────────────────────────────────────────────
+  // ── VoIP Call Flow ──────────────────────────────────────────────────────────
   const startCall = async () => {
     setError(null)
     setTranscripts([])
@@ -285,9 +269,6 @@ export default function RealTimeCall() {
       })
 
       await playBotResponse(response.bot_response, response.audio_uri, response.language)
-
-      // Call NEVER auto-ends — only the user can hang up by pressing the red button.
-      // The bot stays alive in 'open' state answering any further questions.
     } catch (err) {
       setError('Unable to reach server. Call disconnected.')
       hangUp()
@@ -298,17 +279,11 @@ export default function RealTimeCall() {
     setCallState('speaking')
     setTranscripts((prev) => [...prev, { role: 'bot', text }])
 
-    // Synchronously update language state & ref if backend dynamically switched it
     if (responseLanguage && responseLanguage !== language) {
       setLanguage(responseLanguage)
       languageRef.current = responseLanguage
     }
 
-    // We cannot listen while the bot is speaking, otherwise the laptop microphone 
-    // will pick up the bot's own voice from the speakers and interrupt itself!
-    // So we wait until the audio finishes before listening again.
-
-    // Play audio
     if (isSpeakerOn) {
       if (audioUri && audioUri.startsWith('data:')) {
         await speakAudioUriPromise(audioUri)
@@ -319,15 +294,12 @@ export default function RealTimeCall() {
       await new Promise((r) => setTimeout(r, Math.max(1500, text.length * 50)))
     }
 
-    // After bot speech finishes, set state to listening
-    await new Promise(resolve => setTimeout(resolve, 0));
-    setCallState('listening');
-    
-    // Now that speaking is done, we can safely listen to the user
-    startRecognition();
+    await new Promise(resolve => setTimeout(resolve, 0))
+    setCallState('listening')
+    startRecognition()
   }
 
-  const hangUp = (completedGracefully = false) => {
+  const hangUp = () => {
     stopTimer()
     stopRecognition()
     cancelActiveAudio()
@@ -352,164 +324,168 @@ export default function RealTimeCall() {
       {/* Header */}
       <header className="rtc__header">
         <div className="rtc__logo">
-          <div className="rtc__logo-icon" style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--grad-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem', boxShadow: 'var(--shadow-glow)' }}>🤖</div>
+          <div className="rtc__logo-icon">🤖</div>
           <span>Bridgeon <span className="rtc__logo-gradient">Buddy</span></span>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <Link to="/bot" className="rtc__btn-back">💬 Chat Bot</Link>
-          <Link to="/" className="rtc__btn-back">← Home</Link>
+          <Link to="/admin" className="rtc__btn-back">⚙️ Admin Panel</Link>
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="rtc__content">
-        {/* Status */}
-        <div className="rtc__status-panel">
-          <h1 className="rtc__caller-name">Bridgeon Voice Assistant</h1>
-          <div className="rtc__call-duration">
-            {callState === 'idle' ? 'Ready to Call' : formatDuration(duration)}
+      {/* Center Layout for Single Calling Option */}
+      <div className="rtc__layout-container rtc__layout-container--single">
+        
+        <section className="rtc__left-panel rtc__left-panel--single glass animate-fade-in-up">
+          
+          <div className="rtc__operator-header" style={{ width: '100%', textAlign: 'center', borderBottom: 'none' }}>
+            <h3>🔴 Live AI Calling Assistant</h3>
+            <p className="rtc__operator-subtitle" style={{ fontSize: '0.85rem' }}>
+              Bilingual Voice Bot using ElevenLabs · Sarvam AI · LLMs
+            </p>
           </div>
-          <span className="rtc__status-badge">
-            {callState === 'idle' && 'Idle'}
-            {callState === 'ringing' && 'Ringing…'}
-            {callState === 'connected' && 'Connected'}
-            {callState === 'speaking' && '🔊 Bot Speaking'}
-            {callState === 'listening' && (isMuted ? '🔇 Muted' : '🎙️ Listening…')}
-            {callState === 'processing' && '🧠 Thinking…'}
-            {callState === 'ended' && 'Call Ended'}
-          </span>
-        </div>
 
-        {/* Orb */}
-        <div className="rtc__orb-container">
-          {callState !== 'idle' && callState !== 'ended' && (
-            <>
-              <div className="rtc__orb-pulse rtc__orb-pulse--1" />
-              <div className="rtc__orb-pulse rtc__orb-pulse--2" />
-            </>
-          )}
-          <div className="rtc__orb">
-            {callState === 'idle' && '📞'}
-            {callState === 'ringing' && '📞'}
-            {callState === 'connected' && '✅'}
-            {callState === 'speaking' && '🔊'}
-            {callState === 'listening' && (isMuted ? '🔇' : '🎙️')}
-            {callState === 'processing' && '🧠'}
-            {callState === 'ended' && '🛑'}
-          </div>
-        </div>
-
-        {/* Wave Visualizer */}
-        {(callState === 'listening' || callState === 'speaking') && (
-          <div className="rtc__waves" aria-hidden="true">
-            <div className="rtc__wave-bar" />
-            <div className="rtc__wave-bar" />
-            <div className="rtc__wave-bar" />
-            <div className="rtc__wave-bar" />
-            <div className="rtc__wave-bar" />
-            <div className="rtc__wave-bar" />
-            <div className="rtc__wave-bar" />
-          </div>
-        )}
-
-        {/* Transcript */}
-        <div className="rtc__transcript-box glass">
-          {transcripts.length === 0 ? (
-            <div className="rtc__transcript-placeholder">
-              <p>No active transcription.</p>
-              <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>
-                Tap the call button below to start.
-              </p>
+          {/* Call Status Display */}
+          <div className="rtc__status-panel">
+            <h2 className="rtc__caller-name">Bridgeon Voice Assistant</h2>
+            <div className="rtc__call-duration">
+              {callState === 'idle' ? 'Ready to Call' : formatDuration(duration)}
             </div>
-          ) : (
-            transcripts.map((msg, i) => (
-              <div key={i} className={`rtc__dialogue rtc__dialogue--${msg.role}`}>
-                {msg.text}
+            <span className="rtc__status-badge">
+              {callState === 'idle' && 'Idle'}
+              {callState === 'ringing' && 'Ringing…'}
+              {callState === 'connected' && 'Connected'}
+              {callState === 'speaking' && '🔊 Bot Speaking'}
+              {callState === 'listening' && (isMuted ? '🔇 Muted' : '🎙️ Listening…')}
+              {callState === 'processing' && '🧠 Thinking…'}
+              {callState === 'ended' && 'Call Ended'}
+            </span>
+          </div>
+
+          {/* Call Orb */}
+          <div className="rtc__orb-container">
+            {callState !== 'idle' && callState !== 'ended' && (
+              <>
+                <div className="rtc__orb-pulse rtc__orb-pulse--1" />
+                <div className="rtc__orb-pulse rtc__orb-pulse--2" />
+              </>
+            )}
+            <div className="rtc__orb">
+              <span className="rtc__orb-emoji">
+                {callState === 'idle' && '📞'}
+                {callState === 'ringing' && '📞'}
+                {callState === 'connected' && '✅'}
+                {callState === 'speaking' && '🔊'}
+                {callState === 'listening' && (isMuted ? '🔇' : '🎙️')}
+                {callState === 'processing' && '🧠'}
+                {callState === 'ended' && '🛑'}
+              </span>
+            </div>
+          </div>
+
+          {/* Wave Visualizer */}
+          {(callState === 'listening' || callState === 'speaking') && (
+            <div className="rtc__waves" aria-hidden="true">
+              <div className="rtc__wave-bar" />
+              <div className="rtc__wave-bar" />
+              <div className="rtc__wave-bar" />
+              <div className="rtc__wave-bar" />
+              <div className="rtc__wave-bar" />
+              <div className="rtc__wave-bar" />
+              <div className="rtc__wave-bar" />
+            </div>
+          )}
+
+          {/* Transcripts Panel */}
+          <div className="rtc__transcript-box">
+            {transcripts.length === 0 ? (
+              <div className="rtc__transcript-placeholder">
+                <span className="placeholder-icon">🎙️</span>
+                <p>No active transcription.</p>
+                <p style={{ fontSize: '0.82rem', opacity: 0.7 }}>
+                  Click the green phone icon below to start a live voice session.
+                </p>
               </div>
-            ))
-          )}
-          {interimTranscript && (
-            <div className="rtc__dialogue rtc__dialogue--user rtc__dialogue--interim">
-              <i>{interimTranscript}</i>
+            ) : (
+              transcripts.map((msg, i) => (
+                <div key={i} className={`rtc__dialogue rtc__dialogue--${msg.role}`}>
+                  {msg.text}
+                </div>
+              ))
+            )}
+            {interimTranscript && (
+              <div className="rtc__dialogue rtc__dialogue--user rtc__dialogue--interim">
+                <i>{interimTranscript}</i>
+              </div>
+            )}
+            <div ref={transcriptsEndRef} />
+          </div>
+
+          {/* Controls */}
+          <div className="rtc__controls" style={{ paddingBottom: '0.5rem' }}>
+            {error && (
+              <div className="bot-sim__error" style={{ marginBottom: '1rem', width: '100%' }}>
+                <strong>Notice:</strong> {error}
+              </div>
+            )}
+
+            <div className="rtc__main-buttons">
+              <button
+                type="button"
+                className={`rtc__btn-secondary ${isMuted ? 'rtc__btn-secondary--muted' : ''}`}
+                onClick={toggleMute}
+                disabled={callState === 'idle' || callState === 'ended'}
+                title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+              >
+                {isMuted ? '🔇' : '🎙️'}
+              </button>
+
+              {callState === 'idle' || callState === 'ended' ? (
+                <button
+                  type="button"
+                  className="rtc__btn-start"
+                  onClick={callState === 'ended' ? resetCall : startCall}
+                  title="Start voice session"
+                >
+                  📞
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="rtc__btn-hangup"
+                  onClick={hangUp}
+                  title="Hang up call"
+                >
+                  📞
+                </button>
+              )}
+
+              <button
+                type="button"
+                className={`rtc__btn-secondary ${isSpeakerOn ? 'rtc__btn-secondary--active' : ''}`}
+                onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+                disabled={callState === 'idle' || callState === 'ended'}
+                title={isSpeakerOn ? 'Speaker output off' : 'Speaker output on'}
+              >
+                {isSpeakerOn ? '🔊' : '🔈'}
+              </button>
             </div>
-          )}
-          <div ref={transcriptsEndRef} />
-        </div>
+
+            <div className="rtc__settings-bar">
+              <div>
+                Language: <span style={{ color: '#fff', fontWeight: 600 }}>🤖 Bilingual Auto-Detect</span>
+              </div>
+              <div className="rtc__dot-divider" />
+              <div>
+                Voice Backend: <span style={{ color: '#fff', fontWeight: 600 }}>
+                  {voiceStatus?.elevenlabs_configured ? 'ElevenLabs' : voiceStatus?.sarvam_configured ? 'Sarvam AI' : 'Browser/LLM'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </section>
 
       </div>
-
-      {/* Controls — only 3 buttons: Mute, Call/Hangup, Speaker */}
-      <div className="rtc__controls">
-        {error && (
-          <div className="bot-sim__error glass" style={{ margin: '0 0 1rem', width: '100%' }}>
-            <strong>Notice:</strong> {error}
-          </div>
-        )}
-
-        <div className="rtc__main-buttons">
-          {/* Mute */}
-          <button
-            type="button"
-            className={`rtc__btn-secondary ${isMuted ? 'rtc__btn-secondary--muted' : ''}`}
-            onClick={toggleMute}
-            disabled={callState === 'idle' || callState === 'ended'}
-            title={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? '🔇' : '🎙️'}
-          </button>
-
-          {/* Call / Hangup */}
-          {callState === 'idle' || callState === 'ended' ? (
-            <button
-              type="button"
-              className="rtc__btn-start"
-              onClick={callState === 'ended' ? resetCall : startCall}
-              title="Start call"
-            >
-              📞
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="rtc__btn-hangup"
-              onClick={() => hangUp(false)}
-              title="Hang up"
-            >
-              📞
-            </button>
-          )}
-
-          {/* Speaker */}
-          <button
-            type="button"
-            className={`rtc__btn-secondary ${isSpeakerOn ? 'rtc__btn-secondary--active' : ''}`}
-            onClick={() => setIsSpeakerOn(!isSpeakerOn)}
-            disabled={callState === 'idle' || callState === 'ended'}
-            title={isSpeakerOn ? 'Speaker off' : 'Speaker on'}
-          >
-            {isSpeakerOn ? '🔊' : '🔈'}
-          </button>
-        </div>
-
-        {/* Minimal settings — just language */}
-        <div className="rtc__settings-bar">
-          <div>
-            Language:{' '}
-            <span style={{ color: '#fff', fontWeight: 500 }}>
-              🤖 Bilingual Auto-Detect
-            </span>
-          </div>
-          <div style={{ width: '1px', height: '12px', background: 'rgba(255,255,255,0.1)' }} />
-          <div>
-            Voice:{' '}
-            <span style={{ color: '#fff', fontWeight: 500 }}>
-              {voiceStatus?.stt === 'sarvam' ? 'Sarvam AI' : voiceStatus?.stt === 'openai' ? 'OpenAI' : 'Browser'}
-            </span>
-          </div>
-        </div>
-      </div>
-      {/* ElevenLabs Conversational AI Widget */}
-      <elevenlabs-convai agent-id="agent_4801kvf11f4gewwt3mg7pphze2mt"></elevenlabs-convai>
     </div>
   )
 }

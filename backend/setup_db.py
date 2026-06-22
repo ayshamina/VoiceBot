@@ -11,10 +11,10 @@ def check_postgresql():
     """Check if PostgreSQL is installed and accessible."""
     try:
         import psycopg2
-        print("✓ psycopg2 is installed")
+        print("[OK] psycopg2 is installed")
         return True
     except ImportError:
-        print("✗ psycopg2 not found. Install with: pip install psycopg2-binary")
+        print("[ERROR] psycopg2 not found. Install with: pip install psycopg2-binary")
         return False
 
 def check_database_connection():
@@ -22,10 +22,10 @@ def check_database_connection():
     try:
         from app.core.database import engine
         with engine.connect() as conn:
-            print("✓ Database connection successful!")
+            print("[OK] Database connection successful!")
             return True
     except Exception as e:
-        print(f"✗ Database connection failed: {e}")
+        print(f"[ERROR] Database connection failed: {e}")
         print("\nTroubleshooting steps:")
         print("1. Verify PostgreSQL is running")
         print("2. Check DATABASE_URL in .env file")
@@ -40,13 +40,13 @@ def initialize_database():
         from app.core.init_db import init_db, init_sample_data
         print("\nInitializing database...")
         init_db()
-        print("✓ Database tables created")
+        print("[OK] Database tables created")
         
         init_sample_data()
-        print("✓ Sample data loaded")
+        print("[OK] Sample data loaded")
         return True
     except Exception as e:
-        print(f"✗ Database initialization failed: {e}")
+        print(f"[ERROR] Database initialization failed: {e}")
         return False
 
 def main():
@@ -62,12 +62,12 @@ def main():
     
     # Check for .env file
     if not Path(".env").exists():
-        print("\n✗ .env file not found!")
+        print("\n[ERROR] .env file not found!")
         print("  Copy .env.example to .env and update DATABASE_URL if needed")
         print(f"  cp .env.example .env")
         return False
     
-    print("✓ .env file found")
+    print("[OK] .env file found")
     
     # Check psycopg2
     if not check_postgresql():
@@ -83,7 +83,7 @@ def main():
         return False
     
     print("\n" + "=" * 60)
-    print("✓ Setup complete! You can now start the backend:")
+    print("[OK] Setup complete! You can now start the backend:")
     print("  python main.py")
     print("=" * 60)
     return True
