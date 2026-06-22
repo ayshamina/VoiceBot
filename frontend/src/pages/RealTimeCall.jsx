@@ -284,9 +284,6 @@ export default function RealTimeCall() {
       languageRef.current = responseLanguage
     }
 
-    // Start recognition immediately to listen for user interruption / barge-in
-    startRecognition()
-
     if (isSpeakerOn) {
       if (audioUri && audioUri.startsWith('data:')) {
         await speakAudioUriPromise(audioUri)
@@ -297,7 +294,7 @@ export default function RealTimeCall() {
       await new Promise((r) => setTimeout(r, Math.max(1500, text.length * 50)))
     }
 
-    // If the session was not interrupted and is still in speaking state, return to listening
+    // If the session was not manually interrupted and is still in speaking state, return to listening
     if (stateRef.current === 'speaking') {
       setCallState('listening')
       startRecognition()
