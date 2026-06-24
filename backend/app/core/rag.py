@@ -157,9 +157,29 @@ def retrieve_grounded_answer(query: str, db: Session, language: str = "en", top_
 
 
 async def retrieve_grounded_answer_async(
-    query: str, db: Session, language: str = "en", top_k: int = 2
+    query: str, db: Session, language: str = "en", top_k: int = 2, chat_history: Optional[List[Dict[str, str]]] = None
 ) -> str:
     """RAG answer with optional OpenAI/Sarvam enhancement when API keys are configured."""
+    # First, check if we have an exact or high-confidence FAQ match in the database to bypass the LLM
+    index = _build_index(db)
+    if index:
+        query_embedding = _vectorize(query)
+        scored = []
+        for doc in index:
+            score = _cosine_similarity(query_embedding, doc["embedding"])
+            # Threshold of 0.65 represents a very strong match for key terms
+            if score > 0.65:
+                scored.append((score, doc["entry"]))
+        
+        if scored:
+            scored.sort(key=lambda x: x[0], reverse=True)
+            best_score, best_doc = scored[0]
+            print(f"[RAG] High-confidence FAQ match found (score={best_score:.2f}), bypassing LLM to decrease thinking time.")
+            if language == "ml":
+                return best_doc.answer_ml or best_doc.answer_en or ""
+            return best_doc.answer_en or best_doc.answer_ml or ""
+
+    # Otherwise, proceed with full RAG + LLM enhancement
     docs = retrieve_relevant_docs(query, db, top_k=top_k)
     context = ""
     if docs:
@@ -173,27 +193,36 @@ async def retrieve_grounded_answer_async(
             context = f"Web Search Results:\n{search_results}"
 
     from app.core.config import settings
-    from app.services.voice import enhance_rag_answer, sarvam_enhance_rag_answer
+    from app.services.voice import enhance_rag_answer, sarvam_enhance_rag_answer, gemma_enhance_rag_answer
 
     # If context is empty, only proceed if LLMs are configured. Otherwise exit.
     if not context or not context.strip():
-        if not (settings.openai_configured or settings.sarvam_configured):
+        if not (settings.openai_configured or settings.sarvam_configured or settings.gemma_configured):
             return ""
         context = ""
 
-    # 1. Try OpenAI RAG enhancement first
+    # 1. Try Gemma RAG enhancement first if configured
+    if settings.gemma_configured:
+        try:
+            enhanced = await gemma_enhance_rag_answer(query, context, language, chat_history)
+            if enhanced:
+                return enhanced
+        except Exception as e:
+            print(f"[RAG] Gemma enhancement failed ({type(e).__name__}), trying OpenAI fallback.")
+
+    # 2. Try OpenAI RAG enhancement
     if settings.openai_configured:
         try:
-            enhanced = await enhance_rag_answer(query, context, language)
+            enhanced = await enhance_rag_answer(query, context, language, chat_history)
             if enhanced:
                 return enhanced
         except Exception as e:
             print(f"[RAG] OpenAI enhancement failed ({type(e).__name__}), trying Sarvam fallback.")
 
-    # 2. Fall back to Sarvam AI LLM RAG enhancement
+    # 3. Fall back to Sarvam AI LLM RAG enhancement
     if settings.sarvam_configured:
         try:
-            enhanced = await sarvam_enhance_rag_answer(query, context, language)
+            enhanced = await sarvam_enhance_rag_answer(query, context, language, chat_history)
             if enhanced:
                 return enhanced
         except Exception as e:

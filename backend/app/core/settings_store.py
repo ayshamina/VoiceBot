@@ -11,8 +11,8 @@ from app.core.models import Setting, AuditLog, KnowledgeGap
 
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
-    "greeting_en": "Hello! Welcome to Bridgeon Skillversity. Are you a current student or are you exploring our courses?",
-    "greeting_ml": "Namaskaram! Bridgeon Skillversity-ilekku swagatham. Ningal oru vidhyarthi aano, atho course-ukale kurichu anweshikkan vilichathaano?",
+    "greeting_en": "Hello, thank you for calling Bridgeon. How may I assist you today?",
+    "greeting_ml": "ഹലോ, ബ്രിഡ്ജിയോണിലേക്ക് വിളിച്ചതിന് നന്ദി. ഞാൻ ഇന്ന് നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?",
     "voice_en": "en-IN-Wavenet-A (Female)",
     "voice_ml": "ml-IN-Standard-A (Female)",
     "speaking_speed": "normal",

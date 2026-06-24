@@ -56,7 +56,7 @@ def _exoml_play_audio(audio_url: str, record_url: Optional[str] = None) -> str:
     record_section = ""
     if record_url:
         record_section = f"""
-    <Record action="{record_url}" maxLength="120" finishOnKey="#" playBeep="true"/>"""
+    <Record action="{record_url}" maxLength="120" timeout="3" finishOnKey="#" playBeep="true"/>"""
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -72,7 +72,7 @@ def _exoml_say(message: str, record_url: Optional[str] = None) -> str:
     record_section = ""
     if record_url:
         record_section = f"""
-    <Record action="{record_url}" maxLength="120" finishOnKey="#" playBeep="true"/>"""
+    <Record action="{record_url}" maxLength="120" timeout="3" finishOnKey="#" playBeep="true"/>"""
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -226,6 +226,7 @@ class TelephonyStatusResponse(BaseModel):
     sarvam_configured: bool
     exotel_configured: bool
     openai_configured: bool
+    gemma_configured: bool
 
 
 class InboundCallPayload(BaseModel):
@@ -297,6 +298,7 @@ async def get_telephony_status():
         sarvam_configured=voice.get("sarvam_configured", False),
         exotel_configured=voice.get("exotel_configured", False),
         openai_configured=voice.get("openai_configured", False),
+        gemma_configured=voice.get("gemma_configured", False),
     )
 
 
@@ -567,7 +569,7 @@ async def exotel_inbound_recording(
             ChatPayload(text=transcript, session_id=session_id, language=language, caller_number=caller), db=db
         )
 
-    response_text = bot_response.get("response_text", "Thank you for calling Bridgeon.")
+    response_text = bot_response.get("response_text", "Thank you for contacting Bridgeon. We look forward to helping you grow with us.")
     bot_state = bot_response.get("state", "unknown")
     tlog.info(f"Bot response", state=bot_state, intent=bot_response.get('intent'), text_preview=response_text[:80])
 
@@ -872,7 +874,7 @@ async def twilio_inbound_recording(
             ChatPayload(text=transcript, session_id=session_id, language=language, caller_number=caller), db=db
         )
 
-    response_text = bot_response.get("response_text", "Thank you for calling Bridgeon.")
+    response_text = bot_response.get("response_text", "Thank you for contacting Bridgeon. We look forward to helping you grow with us.")
     bot_state = bot_response.get("state", "unknown")
 
     updated_language = bot_response.get("language", language)
@@ -911,6 +913,7 @@ async def twilio_inbound_recording(
         response.record(
             action=next_record_url,
             max_length=120,
+            timeout=3,
             play_beep=True,
             finish_on_key="#"
         )
@@ -952,6 +955,7 @@ async def twilio_outbound_webhook(
     response.record(
         action=record_url,
         max_length=120,
+        timeout=3,
         play_beep=True,
         finish_on_key="#"
     )

@@ -40,12 +40,13 @@ def _get_initial_session() -> Dict[str, Any]:
         "lead_saved": False,
         "language": "en",   # Always start fresh as English; overridden by language selector
         "unclear_attempts": 0,
+        "chat_history": [],  # Conversational memory for human-like dialogue
     }
 
 
 async def _resolve_language_llm(raw_text: str, current_lang: str) -> Optional[str]:
     from app.core.config import settings
-    if not settings.openai_configured:
+    if not settings.openai_configured and not settings.gemma_configured:
         return None
 
     text_stripped = raw_text.strip()
@@ -66,24 +67,37 @@ async def _resolve_language_llm(raw_text: str, current_lang: str) -> Optional[st
     import httpx
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            headers = {
-                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": settings.OPENAI_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"User text: \"{text_stripped}\""}
-                ],
-                "max_tokens": 10,
-                "temperature": 0.0,
-            }
-            response = await client.post(
-                f"{settings.OPENAI_API_BASE}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
+            if settings.gemma_configured:
+                url = f"{settings.GEMMA_API_BASE.strip()}/chat/completions"
+                headers = {"Content-Type": "application/json"}
+                if settings.GEMMA_API_KEY.strip():
+                    headers["Authorization"] = f"Bearer {settings.GEMMA_API_KEY}"
+                payload = {
+                    "model": settings.GEMMA_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"User text: \"{text_stripped}\""}
+                    ],
+                    "max_tokens": 10,
+                    "temperature": 0.0,
+                }
+            else:
+                url = f"{settings.OPENAI_API_BASE}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": settings.OPENAI_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"User text: \"{text_stripped}\""}
+                    ],
+                    "max_tokens": 10,
+                    "temperature": 0.0,
+                }
+
+            response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             res_json = response.json()
             detected = res_json["choices"][0]["message"]["content"].strip().lower()
@@ -196,11 +210,11 @@ def _escalation_message(session: Dict[str, Any], db: Session) -> str:
     if session.get("language") == "ml":
         return (
             f"ക്ഷമിക്കണം, എനിക്ക് മനസ്സിലായില്ല. "
-            f"ഞാൻ നിങ്ങളെ ഒരു കൗൺസെലറിലേക്ക് കൈമാറുന്നു. ദയവായി {number} എന്ന നമ്പറിൽ കാത്തിരിക്കുക."
+            f"കൂടുതൽ സഹായത്തിനായി ഞാൻ നിങ്ങളെ ശരിയായ വിഭാഗവുമായി ബന്ധിപ്പിക്കാം. ദയവായി {number} എന്ന നമ്പറിൽ കാത്തിരിക്കുക."
         )
     return (
         f"I'm sorry, I'm having trouble understanding. "
-        f"Let me connect you with a counselor. Please hold while we transfer you to {number}."
+        f"I’ll connect you to the right department for further assistance. Please hold while we transfer you to {number}."
     )
 
 
@@ -406,7 +420,7 @@ async def _check_intent_switch(raw_text: str, text: str, session: Dict[str, Any]
         return None
 
     # Always use retrieve_grounded_answer_async which queries both vector store and database
-    rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"))
+    rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"), chat_history=session.get("chat_history"))
     if rag_answer:
         return {
             "answer": rag_answer,
@@ -449,6 +463,9 @@ async def chat(payload: ChatPayload, db: Session = Depends(get_db)):
     text = raw_text.lower()
 
     session = get_bot_session(session_id, db)
+    if "chat_history" not in session:
+        session["chat_history"] = []
+
     if payload.caller_number:
         session["caller_number"] = payload.caller_number
         
@@ -457,12 +474,21 @@ async def chat(payload: ChatPayload, db: Session = Depends(get_db)):
     if "long_term_memory" not in session and session.get("caller_number"):
         _initialize_long_term_memory(session, db)
         
+    # Record user turn in chat history
+    if raw_text not in ("__START__", "__start__"):
+        session["chat_history"].append({"role": "user", "content": raw_text})
+        
     result = await _handle_chat_turn(session, raw_text, text, db)
     
     emotion = _detect_emotion_and_tone(raw_text)
     result["response_text"] = _apply_emotion_prefix(result.get("response_text", ""), emotion, session.get("language", "en"))
     result["emotion"] = emotion
     
+    # Record assistant turn in chat history
+    if result.get("response_text"):
+        session["chat_history"].append({"role": "assistant", "content": result["response_text"]})
+        session["chat_history"] = session["chat_history"][-20:]  # Bound history size
+        
     res = _finalize(session, session_id, result, db)
     save_bot_session(session_id, session, db)
     return res
@@ -634,6 +660,27 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
     # ── STATE: GREETING ──────────────────────────────────────────────────────────
     if state == "greeting":
+        lang = session.get("language", "en")
+        
+        # Check if the user is asking a question immediately after greeting (dynamic transition)
+        rag_answer = await retrieve_grounded_answer_async(
+            raw_text, db, language=lang, chat_history=session.get("chat_history")
+        )
+        if rag_answer:
+            student_terms = ["class", "batch", "schedule", "deadline", "project", "mentor"]
+            if any(t in text for t in student_terms):
+                session["state"] = "student_faq"
+                session["user_type"] = "student"
+            else:
+                session["state"] = "explore_courses"
+                session["user_type"] = "prospective"
+            return {
+                "response_text": rag_answer,
+                "state": session["state"],
+                "user_type": session["user_type"],
+                "intent": "rag_response",
+            }
+
         student_keywords = [
             "student",
             "study",
@@ -685,12 +732,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
         is_student = any(k in text for k in student_keywords)
         is_explorer = any(k in text for k in explorer_keywords)
 
-        lang = session.get("language", "en")
         if is_student:
             session["user_type"] = "student"
             session["state"] = "student_faq"
             if lang == "ml":
-                msg = ("സ്വാഗതം! ബ്രിഡ്ജിയോൺ ക്ലാസ് ഷെഡ്യൂൾ, പ്രോജക്ട് ഡെഡ്‌ലൈൻ, "
+                msg = ("ബ്രിഡ്ജിയോൺ ക്ലാസ് ഷെഡ്യൂൾ, പ്രോജക്ട് ഡെഡ്‌ലൈൻ, "
                        "അല്ലെങ്കിൽ മെന്ററെ ബന്ധപ്പെടുത്തുന്ന കാര്യം — ഇതിൽ ഏതെങ്കിലും "
                        "സഹായം ആണോ വേണ്ടത്?")
             else:
@@ -750,7 +796,7 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
     # ── STATE: EXPLORE COURSES ──────────────────────────────────────────────────
     if state == "explore_courses":
-        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"))
+        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"), chat_history=session.get("chat_history"))
         if rag_answer:
             return {
                 "response_text": rag_answer,
@@ -839,9 +885,9 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             record_knowledge_gap(db, raw_text, category="Course Info")
             trans = _transition_to_next_capture_state(session)
             if lang == "ml":
-                callback_msg = f"നിങ്ങളുടെ ചോദ്യങ്ങൾക്ക് ഉത്തരം നൽകാൻ ഞങ്ങളുടെ കൗൺസലറെ ബന്ധപ്പെടുത്താം. {trans['response_text']}"
+                callback_msg = f"കൂടുതൽ സഹായത്തിനായി ഞാൻ നിങ്ങളെ ശരിയായ വിഭാഗവുമായി ബന്ധിപ്പിക്കാം. {trans['response_text']}"
             else:
-                callback_msg = f"I'd love to connect you with our counselor to answer your questions. {trans['response_text']}"
+                callback_msg = f"I’ll connect you to the right department for further assistance. {trans['response_text']}"
             return {
                 "response_text": callback_msg,
                 "state": trans["state"],
@@ -981,7 +1027,7 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
     # ── STATE: STUDENT FAQ ──────────────────────────────────────────────────────
     if state == "student_faq":
-        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"))
+        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"), chat_history=session.get("chat_history"))
         if rag_answer:
             return {
                 "response_text": rag_answer,
@@ -1047,11 +1093,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             # Keep call alive — go to open state, don't end the call
             session["state"] = "open"
             if lang == "ml":
-                bye_msg = ("സ്വാഗതം! ശ്രദ്ധയോടെ പഠിക്കൂ. "
-                           "ഇനിയും എന്തെങ്കിലും ചോദ്യങ്ങൾ ഉണ്ടെങ്കിൽ ചോദിക്കൂ!")
+                bye_msg = ("ബ്രിഡ്ജിയോണുമായി ബന്ധപ്പെട്ടതിന് നന്ദി. "
+                           "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ വളർത്തിയെടുക്കാൻ ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു.")
             else:
-                bye_msg = ("You are welcome! Keep up the great work. "
-                           "I'm still here if you have any more questions!")
+                bye_msg = ("Thank you for contacting Bridgeon. "
+                           "We look forward to helping you grow with us.")
             return {
                 "response_text": bye_msg,
                 "state": "open",
@@ -1105,13 +1151,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
         is_farewell = any(k in text for k in farewell_keywords)
         if is_farewell:
             if lang == "ml":
-                farewell_msg = ("ബ്രിഡ്ജിയോൺ Skillversity-യെ ബന്ധപ്പെട്ടതിന് നന്ദി! "
-                                "ഇനിയും എന്തെങ്കിലും ചോദ്യങ്ങൾ ഉണ്ടെങ്കിൽ ചോദിക്കൂ — "
-                                "ഞാൻ ഇവിടെ ഉണ്ട്.")
+                farewell_msg = ("ബ്രിഡ്ജിയോണുമായി ബന്ധപ്പെട്ടതിന് നന്ദി. "
+                                "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ വളർത്തിയെടുക്കാൻ ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു.")
             else:
-                farewell_msg = ("Thank you for calling Bridgeon Skillversity! "
-                                "I'm still here if you have any more questions — "
-                                "feel free to ask about courses, fees, placements, or anything else!")
+                farewell_msg = ("Thank you for contacting Bridgeon. "
+                                "We look forward to helping you grow with us.")
             return {
                 "response_text": farewell_msg,
                 "state": "open",
@@ -1120,7 +1164,7 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             }
 
         # Try RAG / knowledge base first
-        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=lang)
+        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=lang, chat_history=session.get("chat_history"))
         if rag_answer:
             return {
                 "response_text": rag_answer,
@@ -1171,15 +1215,12 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
         # Generic knowledgeable fallback — stay on call
         record_knowledge_gap(db, raw_text, category="Open Q&A")
         if lang == "ml":
-            fallback = ("നല്ല ചോദ്യം! ഞങ്ങളുടെ ടീം ഉടൻ നിങ്ങൾക്ക് ഈ വിഷയത്തിൽ "
-                        "വിശദമായ ഉത്തരം നൽകും. ഇതിനിടെ, MERN Stack, Python, Flutter, "
-                        "Data Science, UI/UX — ഏത് കോഴ്‌സിൽ ആണ് താൽപ്പര്യം? "
-                        "ഫീ, പ്ലേസ്മെന്റ്, ഷെഡ്യൂൾ — ഇവ ഞാൻ ഇപ്പോൾ പറഞ്ഞുതരാം.")
+            fallback = ("കൂടുതൽ സഹായത്തിനായി ഞാൻ നിങ്ങളെ ശരിയായ വിഭാഗവുമായി ബന്ധിപ്പിക്കാം. "
+                        "ഇതിനിടെ, AI, ഡാറ്റ സയൻസ്, അല്ലെങ്കിൽ ഫ്ലട്ടർ — ഇതിൽ ഏത് കോഴ്‌സിലാണ് താൽപ്പര്യം?")
         else:
-            fallback = ("Great question! Our admissions team will have a detailed answer for you. "
-                        "In the meantime, I can tell you about our courses — MERN Stack, Python Full Stack, "
-                        "Flutter, Data Science, and UI/UX Design — including fees, placement rates, "
-                        "and schedules. What would you like to explore?")
+            fallback = ("I’ll connect you to the right department for further assistance. "
+                        "In the meantime, feel free to ask about our main programs like AI, Data Science, and Flutter. "
+                        "Which course are you most interested in?")
         return {
             "response_text": fallback,
             "state": "open",

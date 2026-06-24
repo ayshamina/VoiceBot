@@ -43,16 +43,24 @@ def get_voice_status() -> dict:
     provider = settings.voice_provider
     telephony = settings.telephony_provider
 
+    llm_type = "local"
+    if settings.gemma_configured:
+        llm_type = "gemma"
+    elif settings.openai_configured:
+        llm_type = "openai"
+
     return {
         "stt": provider,
         "tts": provider,
         "tts_providers": ["sarvam", "elevenlabs", "openai", "browser"] if provider == "browser" else [provider],
-        "llm": "openai" if settings.openai_configured else "local",
+        "llm": llm_type,
         "telephony": telephony,
         "sarvam_configured": settings.sarvam_configured,
         "exotel_configured": settings.exotel_configured,
         "openai_configured": settings.openai_configured,
         "twilio_configured": settings.twilio_configured,
+        "gemma_configured": settings.gemma_configured,
+        "gemma_model": settings.GEMMA_MODEL,
         "voice_provider": provider,
         "telephony_provider": telephony,
         "message": _status_message(),
@@ -63,6 +71,10 @@ def _status_message() -> str:
     parts = []
     if settings.sarvam_configured:
         parts.append("Sarvam AI STT/TTS active (Indian languages supported).")
+    if settings.gemma_configured:
+        parts.append(f"Gemma LLM active (model: {settings.GEMMA_MODEL}).")
+    elif settings.openai_configured:
+        parts.append("OpenAI STT/TTS/LLM active.")
     if settings.exotel_configured:
         parts.append("Exotel telephony active (real inbound/outbound calls enabled).")
     if not parts:
@@ -290,22 +302,79 @@ def search_company_info(search_query: str) -> str:
     except Exception as e:
         return f"Error searching the web: {str(e)}"
 
-async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "en") -> Optional[str]:
+async def gemma_enhance_rag_answer(query: str, context: str, language: str = "en", chat_history: Optional[list] = None) -> Optional[str]:
+    """Use Gemma LLM (local or cloud) to produce a natural answer in Malayalam or English."""
+    if not settings.gemma_configured or not settings.GEMMA_API_BASE.strip():
+        return None
+
+    lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
+    system = (
+        f"You are a professional telecaller agent representing Bridgeon, Kinfra, answering customer calls with accurate, up-to-date information about Bridgeon’s services, courses, and policies.\n"
+        f"You must talk directly to the customer as a human telecaller. Do NOT analyze the request, do NOT write down your thoughts, do NOT show any step-by-step planning or reasoning, and do NOT list any rules. Output ONLY the spoken response that the customer will hear over the phone. Anything else is a critical failure.\n\n"
+        f"Guidelines:\n"
+        f"- Tone: Always sound polite, empathetic, professional, confident, and helpful in {lang_label}. Avoid filler words like 'umm' or 'maybe'. Do not use exclamation marks; end statements with periods.\n"
+        f"- Scope & Knowledge: You answer questions about Bridgeon’s services, courses (AI, Data Science, Flutter, and related programs), internship opportunities, project details, admission process, fees, schedules, office hours (Monday to Saturday, 9:00 AM to 6:00 PM), contact details (+91 9539 50 30 30), and branch locations. Provide clear, confident answers based on the provided Knowledge Context.\n"
+        f"- Out of Scope: If asked something outside your scope or not found in the context, politely say: 'I’ll connect you to the right department for further assistance.'\n"
+        f"- Workflow: Identify the caller’s need quickly and guide them to the next step. Always offer proactive help by asking: 'Would you like me to share the admission form link?' or 'I can connect you to our training coordinator.'\n"
+        f"- Output Format: Speak directly to the caller. Do NOT output any internal planning, chain-of-thought, deconstruction of the request, or checklists. Do NOT explain your reasoning. Output ONLY the final, direct spoken response. If answering in Malayalam, use ONLY Malayalam script."
+    )
+    user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
+
+    messages = [{"role": "system", "content": system}]
+    if chat_history:
+        for turn in chat_history[:-1]:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": user})
+
+    headers = {"Content-Type": "application/json"}
+    if settings.GEMMA_API_KEY.strip():
+        headers["Authorization"] = f"Bearer {settings.GEMMA_API_KEY}"
+
+    payload = {
+        "model": settings.GEMMA_MODEL,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 1000
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{settings.GEMMA_API_BASE.strip()}/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        resp_json = response.json()
+        message = resp_json["choices"][0]["message"]
+        content = message.get("content")
+        if content:
+            return content.strip()
+        return None
+
+
+async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "en", chat_history: Optional[list] = None) -> Optional[str]:
     """Use Sarvam AI LLM (sarvam-30b) to produce a natural answer in Malayalam or English."""
     if not settings.sarvam_configured:
         return None
 
     lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
     system = (
-        f"You are a friendly human admissions receptionist for Bridgeon Skillversity. "
-        f"Answer the user's question entirely in {lang_label} like a human would over a phone call. "
-        f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
-        f"Keep your response extremely brief (ideally ONE or maximum TWO sentences). "
-        f"Do NOT read lists, bullet points, or dry FAQ files. "
-        f"If the caller asks for specific details (like fees, syllabus, class timings, or placements), "
-        f"give a very brief one-sentence answer and immediately ask if they would like a call back from a counselor to explain in detail."
+        f"You are a professional telecaller agent representing Bridgeon, Kinfra, answering customer calls with accurate, up-to-date information about Bridgeon’s services, courses, and policies.\n"
+        f"You must talk directly to the customer as a human telecaller. Do NOT analyze the request, do NOT write down your thoughts, do NOT show any step-by-step planning or reasoning, and do NOT list any rules. Output ONLY the spoken response that the customer will hear over the phone. Anything else is a critical failure.\n\n"
+        f"Guidelines:\n"
+        f"- Tone: Always sound polite, empathetic, professional, confident, and helpful in {lang_label}. Avoid filler words like 'umm' or 'maybe'. Do not use exclamation marks; end statements with periods.\n"
+        f"- Scope & Knowledge: You answer questions about Bridgeon’s services, courses (AI, Data Science, Flutter, and related programs), internship opportunities, project details, admission process, fees, schedules, office hours (Monday to Saturday, 9:00 AM to 6:00 PM), contact details (+91 9539 50 30 30), and branch locations. Provide clear, confident answers based on the provided Knowledge Context.\n"
+        f"- Out of Scope: If asked something outside your scope or not found in the context, politely say: 'I’ll connect you to the right department for further assistance.'\n"
+        f"- Workflow: Identify the caller’s need quickly and guide them to the next step. Always offer proactive help by asking: 'Would you like me to share the admission form link?' or 'I can connect you to our training coordinator.'\n"
+        f"- Output Format: Speak directly to the caller. Do NOT output any internal planning, chain-of-thought, deconstruction of the request, or checklists. Do NOT explain your reasoning. Output ONLY the final, direct spoken response. If answering in Malayalam, use ONLY Malayalam script."
     )
     user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
+
+    messages = [{"role": "system", "content": system}]
+    if chat_history:
+        for turn in chat_history[:-1]:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": user})
 
     headers = {
         "api-subscription-key": settings.SARVAM_API_KEY,
@@ -313,10 +382,7 @@ async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "e
     }
     payload = {
         "model": "sarvam-30b",
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ],
+        "messages": messages,
         "temperature": 0.2,
         "max_tokens": 1500
     }
@@ -341,21 +407,21 @@ async def sarvam_enhance_rag_answer(query: str, context: str, language: str = "e
         return None
 
 
-async def enhance_rag_answer(query: str, context: str, language: str = "en") -> str:
+async def enhance_rag_answer(query: str, context: str, language: str = "en", chat_history: Optional[list] = None) -> str:
     """Use OpenAI to produce a natural answer, falling back to web search if needed."""
     if not settings.openai_configured:
         return context
 
     lang_label = "Malayalam (use Malayalam script strictly, do not mix English words)" if language == "ml" else "English"
     system = (
-        f"You are a friendly human admissions receptionist for Bridgeon Skillversity. "
-        f"Answer the user's question entirely in {lang_label} like a human would over a phone call. "
-        f"Do not mix languages. If answering in Malayalam, use ONLY Malayalam script. "
-        f"Keep your response extremely brief (ideally ONE or maximum TWO sentences). "
-        f"Do NOT read lists, bullet points, or dry FAQ files. "
-        f"If the caller asks for specific details (like fees, syllabus, class timings, or placements), "
-        f"give a very brief one-sentence answer and immediately ask if they would like a call back from a counselor to explain in detail. "
-        f"If you need to use the `search_company_info` tool to browse the web, do so, but summarize the results in one natural, conversational sentence."
+        f"You are a professional telecaller agent representing Bridgeon, Kinfra, answering customer calls with accurate, up-to-date information about Bridgeon’s services, courses, and policies.\n"
+        f"You must talk directly to the customer as a human telecaller. Do NOT analyze the request, do NOT write down your thoughts, do NOT show any step-by-step planning or reasoning, and do NOT list any rules. Output ONLY the spoken response that the customer will hear over the phone. Anything else is a critical failure.\n\n"
+        f"Guidelines:\n"
+        f"- Tone: Always sound polite, empathetic, professional, confident, and helpful in {lang_label}. Avoid filler words like 'umm' or 'maybe'. Do not use exclamation marks; end statements with periods.\n"
+        f"- Scope & Knowledge: You answer questions about Bridgeon’s services, courses (AI, Data Science, Flutter, and related programs), internship opportunities, project details, admission process, fees, schedules, office hours (Monday to Saturday, 9:00 AM to 6:00 PM), contact details (+91 9539 50 30 30), and branch locations. Provide clear, confident answers based on the provided Knowledge Context. If you need to use the `search_company_info` tool to browse the web for missing details, do so and summarize the results.\n"
+        f"- Out of Scope: If asked something outside your scope or not found in the context/search, politely say: 'I’ll connect you to the right department for further assistance.'\n"
+        f"- Workflow: Identify the caller’s need quickly and guide them to the next step. Always offer proactive help by asking: 'Would you like me to share the admission form link?' or 'I can connect you to our training coordinator.'\n"
+        f"- Output Format: Speak directly to the caller. Do NOT output any internal planning, chain-of-thought, deconstruction of the request, or checklists. Do NOT explain your reasoning. Output ONLY the final, direct spoken response. If answering in Malayalam, use ONLY Malayalam script."
     )
     user = f"Caller question: {query}\n\nKnowledge Context:\n{context}"
 
@@ -379,10 +445,11 @@ async def enhance_rag_answer(query: str, context: str, language: str = "en") -> 
         }
     ]
 
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
+    messages = [{"role": "system", "content": system}]
+    if chat_history:
+        for turn in chat_history[:-1]:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": user})
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(

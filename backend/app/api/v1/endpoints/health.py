@@ -68,6 +68,7 @@ async def readiness_check(db: Session = Depends(get_db)):
         "telephony": voice["telephony"],
         "openai": "configured" if voice["openai_configured"] else "not_configured",
         "twilio": "configured" if voice["twilio_configured"] else "not_configured",
+        "gemma": "configured" if voice.get("gemma_configured") else "not_configured",
     }
     
     # Test database connection

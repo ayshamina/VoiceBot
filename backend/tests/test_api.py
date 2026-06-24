@@ -9,6 +9,8 @@ os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["EXOTEL_API_KEY"] = ""
 os.environ["EXOTEL_API_TOKEN"] = ""
 os.environ["EXOTEL_ACCOUNT_SID"] = ""
+os.environ["GEMMA_API_KEY"] = ""
+os.environ["GEMMA_API_BASE"] = ""
 
 from fastapi.testclient import TestClient
 from unittest.mock import patch
@@ -82,6 +84,8 @@ def test_telephony_inbound_call():
 
 
 @patch("app.core.config.settings.OPENAI_API_KEY", "")
+@patch("app.core.config.settings.GEMMA_API_KEY", "")
+@patch("app.core.config.settings.GEMMA_API_BASE", "")
 def test_voice_status_endpoint():
     response = client.get("/api/v1/voice/status")
     assert response.status_code == 200
@@ -89,6 +93,7 @@ def test_voice_status_endpoint():
     assert "stt" in data
     assert "tts" in data
     assert data["openai_configured"] is False
+    assert data["gemma_configured"] is False
 
 def test_voice_training_requires_auth():
     response = client.post(

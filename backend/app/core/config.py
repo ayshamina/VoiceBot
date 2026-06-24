@@ -90,6 +90,15 @@ class Settings:
     def openai_configured(self) -> bool:
         return bool(self.OPENAI_API_KEY.strip())
 
+    # ── Gemma (Native client — optional) ─────────────────────────────────────
+    GEMMA_API_KEY: str = os.getenv("GEMMA_API_KEY", "")
+    GEMMA_API_BASE: str = os.getenv("GEMMA_API_BASE", "")
+    GEMMA_MODEL: str = os.getenv("GEMMA_MODEL", "gemma2")
+
+    @property
+    def gemma_configured(self) -> bool:
+        return bool(self.GEMMA_API_KEY.strip() or self.GEMMA_API_BASE.strip())
+
     @property
     def twilio_configured(self) -> bool:
         return bool(
