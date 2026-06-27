@@ -106,19 +106,90 @@ async def _resolve_language_llm(raw_text: str, current_lang: str) -> Optional[st
     except Exception as e:
         print(f"[LanguageDetect] LLM detection failed: {e}")
     return None
-async def _resolve_language(session: Dict[str, Any], preferred: Optional[str], raw_text: str, db: Session) -> str:
-    # If a specific language is preferred/selected (not "auto"), lock it and bypass detection
-    if preferred in ("en", "ml"):
-        session["language"] = preferred
-        return preferred
 
+
+# Smarter list and suffix definitions for local fast-path language detection
+ML_TRANSLITERATED_WORDS = {
+    # Pronouns & Basics
+    "njan", "njann", "njangal", "njangalude", "ningal", "ningalude", "enikku", "enikk", "enik",
+    "nammal", "nammalude", "nte", "ente", "sukhamaano", "sukhamaanoo", "sukhamano",
+    "nandi", "athe", "alla", "sari", "sheriyaanu", "sheriyanu", "pinne", "pakshe", 
+    "matte", "engil", "enthu", "aano", "aanu", "alle", "yo", "uoo", "undo", "illa", 
+    "illaa", "und", "undd", "unde", "aam", "namaskaram", "namaskaaram", "swagatham", "swaagatham",
+    "ethra", "ethrayaanu", "ethrayanu", "ethraya", "evide", "evideya", "evideyaanu", "evideyanu",
+    "eppo", "eppol", "eppozha", "eppozhaan", "eppozhanu", "engane", "enganeyaanu",
+    "enth", "entha", "enthaanu", "enthanu", "enthann", "aara", "aaraan", "aaraanu",
+    
+    # Common Malayalam verbs/nouns transliterated
+    "samsarikkan", "samsarikkoo", "samsarikkam", "samsarikaam", "samsarikk", "samsarikkatte",
+    "samsarikkaamo", "parayoo", "parayu", "parayam", "parayaam", "parayamo", "parayaamo", 
+    "parayatte", "para", "ariyan", "ariyaan", "ariyam", "ariyaam", "ariyanam", "ariyaanam", 
+    "ariyamo", "ariyilla", "chodikkan", "chodikkaan", "chodikkam", "chodikkaam", "chodikkanam", 
+    "chodikkatte", "chodikkaamo", "choyikkan", "choyikkaan", "choyikkam", "choyikkaam",
+    "choyikkanam", "choyikkaamo", "nokkam", "nokaam", "nokkan", "nookkan", "nokkanam", 
+    "nokkatte", "nalkam", "nalkamo", "nalkaamo", "tharumo", "tharaamo", "tharu", "cheyyan", 
+    "cheyyaan", "cheyyamo", "cheyyaamo", "cheyyo", "cheyyatte", "cheyyam", "cheyyaam",
+    "patto", "pattumo", "pattum", "pattilla", "nadakkum", "nadakkilla", "nadakkoola", 
+    "nadakoolla", "padikkan", "padikkaan", "padikkanam", "padikkaanam", "manassilayi", 
+    "manasilayi", "manassilayilla", "manasilayilla", "joli", "jolli", "jolikari", 
+    "sambalam", "mathi", "aakku", "thirinju", "manസ്സിലായി", "pattilla", "nannayi", 
+    "valare", "ithu", "athu", "ethu", "ithanu", "ithaanu", "athanu", "athaanu",
+    "venam", "venda", "venamennund", "thalparyam", "thalparyamund", "thalparyamilla",
+    "keralathil", "kozhikode", "kinfra", "kakkanad", "malayalam", "malayalathil",
+    "english", "englishil"
+}
+
+ML_SUFFIXES = [
+    "inte", "aano", "alle", "ikkaan", "ikkan", "ikkoo", "ikkaam", "unnu", "unno", 
+    "undo", "illa", "ude", "il", "odu", "athu", "ethu", "ithu", "aanu", "anu",
+    "aamo", "aam", "ukayaanu", "ukayanu", "engil", "ayirunnu", "aayirunnu", 
+    "ayirunno", "aayirunno", "allallo", "allalloo", "uka", "tharaam", "tharam", 
+    "tharoo", "kodukkaam", "kodukkam", "kodukkoo"
+]
+
+EN_INDICATOR_WORDS = {
+    "what", "why", "how", "where", "when", "who", "which", "is", "are", "do", "does", 
+    "did", "can", "could", "should", "would", "please", "course", "courses", "fees", 
+    "fee", "placement", "placements", "admission", "admissions", "syllabus", "internship", 
+    "internships", "training", "project", "projects", "duration", "office", "hours", 
+    "time", "timing", "timings", "class", "classes", "batch", "batches", "counselor", 
+    "mentor", "student", "learn", "study", "job", "salary", "work", "location", "address", 
+    "phone", "number", "call", "callback", "whatsapp", "brochure", "register", "join", 
+    "enroll", "thank", "thanks", "career", "development", "program", "stack", "python", 
+    "flutter", "react", "mern", "science", "design", "ui", "ux", "counseling", "scholarship", 
+    "loan", "emi", "payment", "pay", "cost", "price", "about", "detail", "details", "information",
+    "any", "some", "many", "much", "more", "less", "qualification", "eligibility", "eligible",
+    "require", "required", "requirements", "located", "situated", "whereis"
+}
+
+NEUTRAL_WORDS = {
+    "hello", "hi", "yes", "no", "ok", "okay", "hallo", "hey", "yep", "yeah", "sure", 
+    "namaskaram", "namaskaaram", "ഹലോ", "നമസ്കാരം", "അതെ", "ശരി"
+}
+
+
+async def _resolve_language(session: Dict[str, Any], preferred: Optional[str], raw_text: str, db: Session) -> str:
     text_lower = raw_text.lower().strip()
+    
+    # Short-circuit system startup commands to avoid heuristics/LLM overhead
+    if text_lower in ("__start__", "__start__"):
+        if "language" not in session:
+            session["language"] = preferred if preferred in ("en", "ml") else "en"
+        return session["language"]
+
+    words = set(re.findall(r"\w+", text_lower))
+
+    if not words:
+        if "language" not in session:
+            session["language"] = preferred if preferred in ("en", "ml") else "en"
+        return session["language"]
 
     # 1. Check for explicit bilingual switch commands (English, Malayalam script, and Malayalam transliterated)
     ml_switch_triggers = [
         "speak in malayalam", "talk in malayalam", "switch to malayalam", "change to malayalam",
         "speak malayalam", "talk malayalam", "malayalathil samsarikkoo", "malayalam samsarikkoo",
         "malayalam mathi", "malayalathil aakku", "malayalathil parayoo", "malayalam parayoo",
+        "malayalathil samsarikkaamo", "malayalam samsarikkaamo", "malayalathil parayaamo",
         "മലയാളത്തിൽ സംസാരിക്കൂ", "മലയാളം സംസാരിക്കൂ", "മലയാളം മതി", "മലയാളത്തിൽ ആക്കൂ",
         "മലയാളത്തിൽ പറയൂ", "മലയാളത്തിൽ സംസാരിക്കാമോ", "മലയാളത്തിൽ സംസാരിക്കുക"
     ]
@@ -127,6 +198,7 @@ async def _resolve_language(session: Dict[str, Any], preferred: Optional[str], r
         "speak in english", "talk in english", "switch to english", "change to english",
         "speak english", "talk english", "englishil samsarikkoo", "english samsarikkoo",
         "english mathi", "englishil aakku", "englishil parayoo", "english parayoo",
+        "englishil samsarikkaamo", "english samsarikkaamo", "englishil parayaamo",
         "ഇംഗ്ലീഷിൽ സംസാരിക്കൂ", "ഇംഗ്ലീഷ് സംസാരിക്കൂ", "ഇംഗ്ലീഷ് മതി", "ഇംഗ്ലീഷിൽ ആക്കൂ",
         "ഇംഗ്ലീഷിൽ പറയൂ", "ഇംഗ്ലീഷിൽ സംസാരിക്കാമോ", "ഇംഗ്ലീഷ് സംസാരിക്കുക"
     ]
@@ -142,49 +214,74 @@ async def _resolve_language(session: Dict[str, Any], preferred: Optional[str], r
             session["language"] = "en"
             return "en"
 
-    # 2. Check for Malayalam Unicode script (character-based detection)
+    # 2. Check for Malayalam Unicode script (character-based detection - 100% confident)
     if _contains_malayalam(raw_text):
         session["language"] = "ml"
         return "ml"
 
-    # 3. Call OpenAI LLM for natural language detection (if configured)
-    current_lang = session.get("language") or preferred or "en"
-    detected_lang = await _resolve_language_llm(raw_text, current_lang)
-    if detected_lang:
-        session["language"] = detected_lang
-        return detected_lang
+    # 3. Check for purely neutral words (keep current language, no switch)
+    if words.issubset(NEUTRAL_WORDS):
+        if "language" not in session:
+            session["language"] = preferred if preferred in ("en", "ml") else "en"
+        return session["language"]
 
-    # 4. Fallback: Check for common Malayalam transliterated words (transliterated Malayalam detection)
-    ml_transliterated_words = {
-        "ethra", "ethraya", "sukhamaano", "nandi", "athe", "aam", "alla", "sari", 
-        "parayu", "samsarikk", "chettan", "chechi", "evide", "eppo", "eppol", 
-        "engane", "entha", "enthann", "nokkanam", "parayam", "chodikkam", "nannayi",
-        "kurs", "feesu", "paisa", "chodhyam", "manassilayi"
+    # 3.1 Keep active language for short technical answers or nouns (like course names or numbers)
+    course_terms = {"mern", "stack", "python", "flutter", "react", "science", "design", "ui", "ux", "java"}
+    if len(words) <= 2 and (words.issubset(course_terms.union(NEUTRAL_WORDS)) or all(w.isdigit() for w in words)):
+        if "language" in session:
+            return session["language"]
+
+    # 4. Smart Local Heuristics (Zero Delay)
+    ml_score = 0.0
+    en_score = 0.0
+
+    # 4.1 Check exact transliterated Malayalam words
+    ml_matches = words.intersection(ML_TRANSLITERATED_WORDS)
+    ml_score += len(ml_matches) * 2.0
+
+    # 4.2 Check grammatical suffixes
+    has_ml_suffix = False
+    for word in words:
+        if len(word) > 4:
+            if word.endswith("nte") and word not in ("ante", "monte", "forte", "pointe", "route", "site"):
+                has_ml_suffix = True
+                ml_score += 1.5
+            else:
+                for suffix in ML_SUFFIXES:
+                    if word.endswith(suffix):
+                        has_ml_suffix = True
+                        ml_score += 1.5
+                        break
+
+    # 4.3 Check English indicator words (penalizing borrowed nouns in Manglish)
+    en_matches = words.intersection(EN_INDICATOR_WORDS)
+    borrowed_nouns = {
+        "job", "placement", "fees", "fee", "course", "courses", "batch", "batches", 
+        "class", "classes", "whatsapp", "brochure", "timing", "timings", "mern", 
+        "stack", "python", "flutter", "react", "design", "development", "admissions",
+        "counseling", "syllabus", "duration", "salary", "package", "internship", "projects", "project"
     }
+    for match in en_matches:
+        if match in borrowed_nouns:
+            en_score += 0.5  # Low score weight
+        else:
+            en_score += 1.5  # High score weight for English-only structure/question words
 
-    words = set(re.findall(r"\w+", text_lower))
-    if words.intersection(ml_transliterated_words):
+    # 4.4 Score-based decision
+    if ml_score > 0 or has_ml_suffix:
+        # Malayalam structure/grammar wins
         session["language"] = "ml"
         return "ml"
+    elif en_score > 0:
+        # Clearly English query
+        session["language"] = "en"
+        return "en"
 
-    # 5. Fallback: If the text is purely Latin/English alphabet (no Malayalam script characters),
-    # has no transliterated Malayalam words, and is in Malayalam session, switch to English.
-    if session.get("language") == "ml" and not _contains_malayalam(raw_text):
-        if not words.intersection(ml_transliterated_words) and len(words) >= 1:
-            session["language"] = "en"
-            return "en"
-
-    # 6. Fallback: If current session is Malayalam, but the query is clearly a longer English question, switch back to English
-    en_helper_words = {"what", "why", "how", "where", "when", "who", "which", "is", "are", "do", "does", "did", "can", "could", "should", "would", "please", "course", "fees", "placement", "admissions", "syllabus"}
-    if session.get("language") == "ml" and len(words) >= 3:
-        if words.intersection(en_helper_words):
-            session["language"] = "en"
-            return "en"
-
-    # 7. Default/Fallback: If none of the switch indicators matched, keep the session language if set,
-    # otherwise fall back to the frontend's preferred language, and if that's not set, default to English.
+    # 5. Fallback: Default to current active language to save network latency (approx 1-2s).
+    # Since local heuristics are robust, we bypass the LLM lookup to maximize voice efficiency.
+    current_lang = session.get("language") or preferred or "en"
     if "language" not in session:
-        session["language"] = preferred if preferred in ("en", "ml") else "en"
+        session["language"] = current_lang if current_lang in ("en", "ml") else "en"
 
     return session["language"]
 
@@ -363,7 +460,7 @@ def _transition_to_next_capture_state(session: Dict[str, Any]) -> Dict[str, Any]
 
     if not lead_data.get("name"):
         session["state"] = "lead_capture_name"
-        msg = "നിങ്ങളുടെ പേര് പറയാമോ?" if lang == "ml" else "May I know your name first, please?"
+        msg = "തീർച്ചയായും, നിങ്ങളെ സഹായിക്കുന്നതിൽ എനിക്ക് സന്തോഷമേയുള്ളൂ. ആദ്യം നിങ്ങളുടെ പേര് ഒന്ന് പറയാമോ?" if lang == "ml" else "Of course! I would be delighted to help you. May I know your name first, please?"
         return {
             "response_text": msg,
             "state": "lead_capture_name",
@@ -459,7 +556,8 @@ async def chat(payload: ChatPayload, db: Session = Depends(get_db)):
     and returns intent, state status, and the spoken/written response.
     """
     session_id = payload.session_id
-    raw_text = payload.text.strip()
+    from app.services.voice import normalize_voice_transcript
+    raw_text = normalize_voice_transcript(payload.text.strip())
     text = raw_text.lower()
 
     session = get_bot_session(session_id, db)
@@ -550,6 +648,28 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             "state": "greeting",
             "user_type": "unknown",
             "intent": "greeting",
+        }
+
+    # 1.1 Global check for goodbye / farewell / exit to close with gratitude in customer's language
+    farewell_keywords = [
+        "bye", "goodbye", "thank you", "thanks", "that's all", "that is all",
+        "nothing else", "no more questions", "exit", "quit",
+        "നന്ദി", "ബൈ", "ശരി ബൈ", "മതി", "ഒന്നുമില്ല", "പോകട്ടെ", "താങ്ക്സ്", "താങ്ക് യു"
+    ]
+    if text and any(k in text for k in farewell_keywords):
+        lang = session.get("language", "en")
+        session["state"] = "open"
+        if lang == "ml":
+            farewell_msg = ("ബ്രിഡ്ജിയോൺ സ്കിൽവേഴ്സിറ്റിയുമായി ബന്ധപ്പെട്ടതിന് വളരെ നന്ദി. "
+                            "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ മികച്ച രീതിയിൽ വളർത്തിയെടുക്കാൻ സാധിക്കുമെന്ന് ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു. നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!")
+        else:
+            farewell_msg = ("Thank you so much for contacting Bridgeon Skillversity. "
+                            "It was a pleasure speaking with you, and we look forward to helping you build a highly successful career. Have a wonderful day!")
+        return {
+            "response_text": farewell_msg,
+            "state": "open",
+            "user_type": session.get("user_type", "unknown"),
+            "intent": "farewell",
         }
 
     # Check if they want info sent to WhatsApp/SMS
@@ -796,15 +916,6 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
     # ── STATE: EXPLORE COURSES ──────────────────────────────────────────────────
     if state == "explore_courses":
-        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"), chat_history=session.get("chat_history"))
-        if rag_answer:
-            return {
-                "response_text": rag_answer,
-                "state": "explore_courses",
-                "user_type": "prospective",
-                "intent": "rag_response",
-            }
-
         fee_keywords = ["fee", "fees", "cost", "price", "pricing", "pay", "charges", "ഫീസ്", "പൈസ", "ചെലവ്"]
         placement_keywords = [
             "placement",
@@ -881,19 +992,30 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
                 "user_type": "prospective",
                 "intent": "course_info",
             }
-        else:
-            record_knowledge_gap(db, raw_text, category="Course Info")
-            trans = _transition_to_next_capture_state(session)
-            if lang == "ml":
-                callback_msg = f"കൂടുതൽ സഹായത്തിനായി ഞാൻ നിങ്ങളെ ശരിയായ വിഭാഗവുമായി ബന്ധിപ്പിക്കാം. {trans['response_text']}"
-            else:
-                callback_msg = f"I’ll connect you to the right department for further assistance. {trans['response_text']}"
+
+        # Check local/enhanced RAG next
+        rag_answer = await retrieve_grounded_answer_async(raw_text, db, language=session.get("language", "en"), chat_history=session.get("chat_history"))
+        if rag_answer:
             return {
-                "response_text": callback_msg,
-                "state": trans["state"],
+                "response_text": rag_answer,
+                "state": "explore_courses",
                 "user_type": "prospective",
-                "intent": "request_callback",
+                "intent": "rag_response",
             }
+
+        # Otherwise fallback to callback transition
+        record_knowledge_gap(db, raw_text, category="Course Info")
+        trans = _transition_to_next_capture_state(session)
+        if lang == "ml":
+            callback_msg = f"കൂടുതൽ സഹായത്തിനായി ഞാൻ നിങ്ങളെ ശരിയായ വിഭാഗവുമായി ബന്ധിപ്പിക്കാം. {trans['response_text']}"
+        else:
+            callback_msg = f"I’ll connect you to the right department for further assistance. {trans['response_text']}"
+        return {
+            "response_text": callback_msg,
+            "state": trans["state"],
+            "user_type": "prospective",
+            "intent": "request_callback",
+        }
 
     # ── STATE: LEAD CAPTURE (NAME) ──────────────────────────────────────────────
     if state == "lead_capture_name":
@@ -983,6 +1105,7 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
                 phone=session["lead_data"]["phone"] or "",
                 course=session["lead_data"]["course"] or "Unknown",
                 consent_whatsapp=is_yes,
+                language=session.get("language", "en"),
                 source="bot",
             )
             session["lead_data"]["lead_id"] = lead.id
@@ -1048,12 +1171,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
 
         if any(k in text for k in schedule_keywords):
             if lang == "ml":
-                sched_msg = ("നിങ്ങളുടെ ക്ലാസ് തിങ്കൾ മുതൽ വെള്ളി വരെ "
-                             "രാവിലെ 10 മുതൽ ഉച്ചക്ക് 1 വരെ ആണ്. "
-                             "കൃത്യനിഷ്ഠ പ്രധാനം! നന്നായി പഠിക്കൂ.")
+                sched_msg = ("നിങ്ങളുടെ ക്ലാസുകൾ തിങ്കൾ മുതൽ വെള്ളി വരെ രാവിലെ 10 മണി മുതൽ ഉച്ചയ്ക്ക് 1 മണി വരെയാണ് ഷെഡ്യൂൾ ചെയ്തിരിക്കുന്നത്. "
+                             "ക്ലാസുകളിൽ കൃത്യത പാലിക്കുന്നത് വളരെ പ്രധാനമാണ്. പഠനത്തിൽ മികച്ച വിജയം ആശംസിക്കുന്നു!")
             else:
                 sched_msg = ("Your classes are scheduled Monday to Friday from 10 AM to 1 PM. "
-                             "Remember, consistency is key! Keep up the good work.")
+                             "Maintaining consistency is highly important for your growth. Keep up the wonderful work!")
             return {
                 "response_text": sched_msg,
                 "state": "student_faq",
@@ -1062,13 +1184,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             }
         elif any(k in text for k in project_keywords):
             if lang == "ml":
-                proj_msg = ("നിങ്ങളുടെ പ്രോജക്ട് സമർപ്പിക്കേണ്ട അവസാന തീയതി "
-                            "വെള്ളിയാഴ്ച വൈകിട്ട് 5 മണി ആണ്. "
-                            "ഒരു ഘട്ടമൊരു ഘട്ടമായി ചെയ്യൂ, നിങ്ങൾക്ക് ചെയ്യാൻ കഴിയും!")
+                proj_msg = ("നിങ്ങളുടെ പ്രോജക്റ്റുകൾ സബ്മിറ്റ് ചെയ്യേണ്ട അവസാന സമയം വെള്ളിയാഴ്ച വൈകിട്ട് 5 മണിയാണ്. "
+                             "കോഡിംഗ് ചെയ്യുമ്പോൾ ബുദ്ധിമുട്ടുകൾ ഉണ്ടാകുന്നത് സ്വാഭാവികമാണ്, എങ്കിലും ഇത് നിങ്ങളെ ഒരു പ്രൊഫഷണൽ ഡെവലപ്പർ ആകാൻ സഹായിക്കും. ഓരോ ഘട്ടമായി ചെയ്യൂ, നിങ്ങൾക്ക് തീർച്ചയായും ഇത് സാധിക്കും!")
             else:
                 proj_msg = ("Your project submission deadline is Friday by 5 PM. "
-                            "Developing projects can be tough, but it prepares you for real industry simulation. "
-                            "Take it step by step, you've got this!")
+                             "Working on industry projects can be challenging at times, but it is excellent preparation for your career. Take it step by step, you can absolutely do it!")
             return {
                 "response_text": proj_msg,
                 "state": "student_faq",
@@ -1077,12 +1197,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             }
         elif any(k in text for k in mentor_keywords):
             if lang == "ml":
-                mentor_msg = ("നിങ്ങളുടെ മെന്ററോട് ബന്ധപ്പെടാൻ ഞാൻ അറിയിക്കും. "
-                              "സ്റ്റുഡന്റ് പോർട്ടൽ ഡാഷ്ബോർഡിലും "
-                              "അവരുടെ കോൺടാക്ട് കാർഡ് കാണാം.")
+                mentor_msg = ("നിങ്ങളെ നേരിട്ട് ബന്ധപ്പെടാൻ ഞാൻ നിങ്ങളുടെ മെന്ററോട് ആവശ്യപ്പെടാം. "
+                              "കൂടാതെ, നിങ്ങളുടെ സ്റ്റുഡന്റ് പോർട്ടൽ ഡാഷ്‌ബോർഡിലും മെന്ററുടെ കോൺടാക്ട് വിവരങ്ങൾ കാണാൻ സാധിക്കുന്നതാണ്.")
             else:
-                mentor_msg = ("I will notify your mentor to contact you directly. "
-                              "You can also find their contact card inside your student portal dashboard.")
+                mentor_msg = ("I will gladly notify your mentor to connect with you directly. "
+                              "You can also easily find their contact information on your student portal dashboard.")
             return {
                 "response_text": mentor_msg,
                 "state": "student_faq",
@@ -1093,11 +1212,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
             # Keep call alive — go to open state, don't end the call
             session["state"] = "open"
             if lang == "ml":
-                bye_msg = ("ബ്രിഡ്ജിയോണുമായി ബന്ധപ്പെട്ടതിന് നന്ദി. "
-                           "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ വളർത്തിയെടുക്കാൻ ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു.")
+                bye_msg = ("ബ്രിഡ്ജിയോൺ സ്കിൽവേഴ്സിറ്റിയുമായി ബന്ധപ്പെട്ടതിന് വളരെ നന്ദി. "
+                           "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ മികച്ച രീതിയിൽ വളർത്തിയെടുക്കാൻ സാധിക്കുമെന്ന് ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു. നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!")
             else:
-                bye_msg = ("Thank you for contacting Bridgeon. "
-                           "We look forward to helping you grow with us.")
+                bye_msg = ("Thank you so much for contacting Bridgeon Skillversity. "
+                           "It was a pleasure speaking with you, and we look forward to helping you build a highly successful career. Have a wonderful day!")
             return {
                 "response_text": bye_msg,
                 "state": "open",
@@ -1107,13 +1226,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
         else:
             record_knowledge_gap(db, raw_text, category="Student Support")
             if lang == "ml":
-                support_msg = ("പ്രോഗ്രാമിംഗിൽ ബുദ്ധിമുട്ടുണ്ടാകുന്നത് സ്വാഭാവികമാണ്. "
-                               "നിങ്ങളുടെ ചോദ്യം മെന്ററിനു കൈമാറി. "
-                               "ഷെഡ്യൂൾ അല്ലെങ്കിൽ ഡെഡ്‌ലൈൻ ചെക്ക് ചെയ്യണോ?")
+                support_msg = ("പ്രോഗ്രാമിംഗ് പഠിക്കുമ്പോൾ സംശയങ്ങൾ ഉണ്ടാകുന്നത് തികച്ചും സ്വാഭാവികമാണ്. "
+                               "നിങ്ങളുടെ ചോദ്യം ഞാൻ മെന്റർക്ക് കൈമാറിയിട്ടുണ്ട്, അവർ ഉടൻ തന്നെ നിങ്ങളെ ബന്ധപ്പെടുന്നതായിരിക്കും. ഇതിനിടയിൽ, ക്ലാസ് ഷെഡ്യൂൾ അല്ലെങ്കിൽ പ്രോജക്റ്റ് ഡെഡ്‌ലൈൻ എന്നിവ പരിശോധിക്കാൻ ഞാൻ സഹായിക്കണോ?")
             else:
-                support_msg = ("It is completely normal to hit a wall in programming. "
-                               "I have logged your question for your mentor, and they will connect with you soon. "
-                               "Is there anything else I can check, like your schedule or project deadline?")
+                support_msg = ("It is completely natural to face challenges in programming. "
+                               "I have logged your question for your mentor, and they will reach out to you shortly. In the meantime, would you like me to help check your class schedule or project deadline?")
             return {
                 "response_text": support_msg,
                 "state": "student_faq",
@@ -1151,11 +1268,11 @@ async def _handle_chat_turn(session: Dict[str, Any], raw_text: str, text: str, d
         is_farewell = any(k in text for k in farewell_keywords)
         if is_farewell:
             if lang == "ml":
-                farewell_msg = ("ബ്രിഡ്ജിയോണുമായി ബന്ധപ്പെട്ടതിന് നന്ദി. "
-                                "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ വളർത്തിയെടുക്കാൻ ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു.")
+                farewell_msg = ("ബ്രിഡ്ജിയോൺ സ്കിൽവേഴ്സിറ്റിയുമായി ബന്ധപ്പെട്ടതിന് വളരെ നന്ദി. "
+                                "ഞങ്ങളോടൊപ്പം നിങ്ങളുടെ കരിയർ മികച്ച രീതിയിൽ വളർത്തിയെടുക്കാൻ സാധിക്കുമെന്ന് ഞങ്ങൾ പ്രതീക്ഷിക്കുന്നു. നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!")
             else:
-                farewell_msg = ("Thank you for contacting Bridgeon. "
-                                "We look forward to helping you grow with us.")
+                farewell_msg = ("Thank you so much for contacting Bridgeon Skillversity. "
+                                "It was a pleasure speaking with you, and we look forward to helping you build a highly successful career. Have a wonderful day!")
             return {
                 "response_text": farewell_msg,
                 "state": "open",

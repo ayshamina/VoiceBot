@@ -534,7 +534,18 @@ async def exotel_inbound_recording(
 
                 if len(audio_bytes) > 100:  # sanity check — not an error page
                     transcript = await transcribe_audio(audio_bytes, language)
-                    tlog.info(f"STT result: '{transcript[:100]}'") if transcript else tlog.warn("STT returned empty transcript")
+                    tlog.info(f"STT result (initial, lang={language}): '{transcript[:100]}'") if transcript else tlog.warn("STT returned empty transcript")
+                    
+                    # Double-pass STT: if initial transcription in the active language fails,
+                    # automatically retry transcribing in the alternative language.
+                    if not transcript.strip() or len(transcript.strip()) < 3:
+                        alt_lang = "ml" if language == "en" else "en"
+                        tlog.info(f"Low confidence transcript in '{language}'. Retrying transcription in '{alt_lang}'...")
+                        alt_transcript = await transcribe_audio(audio_bytes, alt_lang)
+                        if alt_transcript.strip() and len(alt_transcript.strip()) >= 3:
+                            transcript = alt_transcript
+                            language = alt_lang  # Update active language
+                            tlog.info(f"Double-pass STT succeeded! Detected and transcribed as '{language}': '{transcript[:100]}'")
                 else:
                     tlog.warn(f"Audio too small ({len(audio_bytes)} bytes) — likely an error page")
 
@@ -842,8 +853,17 @@ async def twilio_inbound_recording(
                 )
                 audio_bytes = audio_resp.content
             transcript = await transcribe_audio(audio_bytes, language)
+            
+            # Double-pass STT: if initial transcription in the active language fails,
+            # automatically retry transcribing in the alternative language.
+            if not transcript.strip() or len(transcript.strip()) < 3:
+                alt_lang = "ml" if language == "en" else "en"
+                alt_transcript = await transcribe_audio(audio_bytes, alt_lang)
+                if alt_transcript.strip() and len(alt_transcript.strip()) >= 3:
+                    transcript = alt_transcript
+                    language = alt_lang  # Update active language
         except Exception:
-            transcript = ""
+            pass
 
     response = VoiceResponse()
 

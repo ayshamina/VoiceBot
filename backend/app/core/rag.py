@@ -69,7 +69,10 @@ def _build_index(db: Session) -> List[Dict[str, Any]]:
         index.append(
             {
                 "id": entry.id,
-                "entry": entry,
+                "question_en": entry.question_en,
+                "answer_en": entry.answer_en,
+                "question_ml": entry.question_ml,
+                "answer_ml": entry.answer_ml,
                 "embedding": _vectorize(_entry_text(entry)),
             }
         )
@@ -80,10 +83,18 @@ def refresh_index(db: Session) -> None:
     """Refresh the RAG index from the database."""
     global _INDEX
     _INDEX = _build_index(db)
+    print(f"[RAG] Index refreshed from database, containing {len(_INDEX)} entries.")
 
 
 # Global index - will be populated from database
 _INDEX: List[Dict[str, Any]] = []
+
+def _get_index(db: Session) -> List[Dict[str, Any]]:
+    """Retrieve the cached RAG index, populating it if empty."""
+    global _INDEX
+    if not _INDEX:
+        _INDEX = _build_index(db)
+    return _INDEX
 
 
 from pathlib import Path
@@ -114,18 +125,25 @@ def retrieve_relevant_docs(query: str, db: Session, top_k: int = 3) -> List[Know
         docs.append(k)
 
     # 2. Fetch from Database (FAQ entries)
-    index = _build_index(db)
+    index = _get_index(db)
     if index:
         query_embedding = _vectorize(query)
         scored: List[Dict[str, Any]] = []
         for doc in index:
             score = _cosine_similarity(query_embedding, doc["embedding"])
             if score > 0:
-                scored.append({"score": score, "entry": doc["entry"]})
+                scored.append({"score": score, "id": doc["id"]})
         
         scored.sort(key=lambda item: item["score"], reverse=True)
-        for item in scored[:top_k]:
-            docs.append(item["entry"])
+        
+        matching_ids = [item["id"] for item in scored[:top_k]]
+        if matching_ids:
+            current_entries = db.query(Knowledge).filter(Knowledge.id.in_(matching_ids)).all()
+            # Order them by score
+            entry_map = {e.id: e for e in current_entries}
+            for m_id in matching_ids:
+                if m_id in entry_map:
+                    docs.append(entry_map[m_id])
 
     return docs[:top_k]
 
@@ -160,8 +178,40 @@ async def retrieve_grounded_answer_async(
     query: str, db: Session, language: str = "en", top_k: int = 2, chat_history: Optional[List[Dict[str, str]]] = None
 ) -> str:
     """RAG answer with optional OpenAI/Sarvam enhancement when API keys are configured."""
+    # Check if the query is a basic greeting/conversational filler.
+    # If not filler and not relevant, immediately return deflection (zero-latency out-of-scope bypass)
+    from app.services.voice import is_query_relevant_to_bridgeon
+    
+    def is_conversational_filler(q: str) -> bool:
+        if not q:
+            return True
+        q_clean = q.lower().strip()
+        fillers = {
+            "hello", "hi", "hey", "hallo", "helo", "yes", "no", "ok", "okay", "yep", "yeah", "sure",
+            "thanks", "thank you", "bye", "goodbye", "exit", "quit", "welcome", "please",
+            "namaskaram", "namaskaaram", "ഹലോ", "നമസ്കാരം", "അതെ", "ശരി", "നന്ദി", "ബൈ",
+            "താങ്ക്സ്", "താങ്ക് യു", "ഒന്നുമില്ല", "മതി", "പോകട്ടെ"
+        }
+        import re
+        words = [w for w in re.findall(r"\w+", q_clean) if w]
+        if not words:
+            return True
+        return all(w in fillers for w in words)
+        
+    if not is_conversational_filler(query) and not is_query_relevant_to_bridgeon(query):
+        import re
+        q_words = [w for w in re.findall(r"\w+", query.lower()) if w]
+        if len(q_words) >= 3:
+            print(f"[RAG] Out-of-scope query '{query}' detected. Bypassing LLM immediately.")
+            from app.core.config import settings
+            if not (settings.openai_configured or settings.sarvam_configured or settings.gemma_configured):
+                return ""
+            if language == "ml":
+                return "എനിക്ക് ബ്രിഡ്ജിയോൺ കോഴ്സുകളെക്കുറിച്ചുള്ള ചോദ്യങ്ങൾക്ക് മാത്രമേ മറുപടി നൽകാൻ സാധിക്കൂ. കൂടുതൽ സഹായത്തിനായി ഞാൻ നിങ്ങളെ കൗൺസിലറുമായി ബന്ധിപ്പിക്കാം."
+            return "I can only help you with questions about Bridgeon courses. I can connect you to our training counselor for further assistance."
+
     # First, check if we have an exact or high-confidence FAQ match in the database to bypass the LLM
-    index = _build_index(db)
+    index = _get_index(db)
     if index:
         query_embedding = _vectorize(query)
         scored = []
@@ -169,15 +219,15 @@ async def retrieve_grounded_answer_async(
             score = _cosine_similarity(query_embedding, doc["embedding"])
             # Threshold of 0.65 represents a very strong match for key terms
             if score > 0.65:
-                scored.append((score, doc["entry"]))
+                scored.append((score, doc))
         
         if scored:
             scored.sort(key=lambda x: x[0], reverse=True)
             best_score, best_doc = scored[0]
             print(f"[RAG] High-confidence FAQ match found (score={best_score:.2f}), bypassing LLM to decrease thinking time.")
             if language == "ml":
-                return best_doc.answer_ml or best_doc.answer_en or ""
-            return best_doc.answer_en or best_doc.answer_ml or ""
+                return best_doc["answer_ml"] or best_doc["answer_en"] or ""
+            return best_doc["answer_en"] or best_doc["answer_ml"] or ""
 
     # Otherwise, proceed with full RAG + LLM enhancement
     docs = retrieve_relevant_docs(query, db, top_k=top_k)
@@ -186,11 +236,14 @@ async def retrieve_grounded_answer_async(
         context = _build_context(docs, language)
 
     if not context:
-        from app.services.voice import search_company_info
-        print(f"[RAG] No local context found, running web search for query: {query}")
-        search_results = search_company_info(query)
-        if search_results and "Error searching the web" not in search_results and "No results found" not in search_results:
-            context = f"Web Search Results:\n{search_results}"
+        from app.services.voice import search_company_info, is_query_relevant_to_bridgeon
+        if is_query_relevant_to_bridgeon(query):
+            print(f"[RAG] No local context found, running web search for query: {query}")
+            search_results = search_company_info(query)
+            if search_results and "Error searching the web" not in search_results and "No results found" not in search_results:
+                context = f"Web Search Results:\n{search_results}"
+        else:
+            print(f"[RAG] Query '{query}' is out of scope. Skipping web search.")
 
     from app.core.config import settings
     from app.services.voice import enhance_rag_answer, sarvam_enhance_rag_answer, gemma_enhance_rag_answer

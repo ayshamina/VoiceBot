@@ -42,7 +42,7 @@ def ingest_pdf(file_path: str, collection_name: str = "bridgeon_docs") -> None:
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     # 4️⃣ Persist to Chroma (creates/opens the collection)
-    store_path = Path(__file__).resolve().parents[3] / "data" / "vectorstore" / collection_name
+    store_path = Path(__file__).resolve().parents[2] / "data" / "vectorstore" / collection_name
     os.makedirs(store_path, exist_ok=True)
     vector_db = Chroma.from_texts(chunks, embeddings, persist_directory=str(store_path))
     if hasattr(vector_db, "persist"):

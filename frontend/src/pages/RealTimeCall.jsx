@@ -250,6 +250,15 @@ export default function RealTimeCall() {
     })
   }
 
+  const handleLanguageChange = (newLang) => {
+    setLanguage(newLang)
+    languageRef.current = newLang
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = (newLang === 'ml' || newLang === 'auto') ? 'ml-IN' : 'en-IN'
+      console.log('[RTC] Dynamically reconfigured speech recognition lang to:', recognitionRef.current.lang)
+    }
+  }
+
   // ── VoIP Call Flow ──────────────────────────────────────────────────────────
   const startCall = async () => {
     setError(null)
@@ -304,7 +313,7 @@ export default function RealTimeCall() {
     botSpokenTextRef.current = text.toLowerCase()
     setTranscripts((prev) => [...prev, { role: 'bot', text }])
 
-    if (responseLanguage && responseLanguage !== language) {
+    if (language !== 'auto' && responseLanguage && responseLanguage !== language) {
       setLanguage(responseLanguage)
       languageRef.current = responseLanguage
     }
@@ -517,9 +526,29 @@ export default function RealTimeCall() {
               </button>
             </div>
 
-            <div className="rtc__settings-bar">
-              <div>
-                Language: <span style={{ color: '#fff', fontWeight: 600 }}>🤖 Bilingual Auto-Detect</span>
+            <div className="rtc__settings-bar" style={{ padding: '0.4rem 1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>Language:</span>
+                <div className="rtc__lang-toggle">
+                  <button
+                    type="button"
+                    className={`rtc__lang-btn ${language === 'auto' ? 'active' : ''}`}
+                    onClick={() => handleLanguageChange('auto')}
+                    title="Bilingual Auto-Detect"
+                  >🤖 AUTO</button>
+                  <button
+                    type="button"
+                    className={`rtc__lang-btn ${language === 'en' ? 'active' : ''}`}
+                    onClick={() => handleLanguageChange('en')}
+                    title="English Only"
+                  >🇺🇸 EN</button>
+                  <button
+                    type="button"
+                    className={`rtc__lang-btn ${language === 'ml' ? 'active' : ''}`}
+                    onClick={() => handleLanguageChange('ml')}
+                    title="Malayalam Only"
+                  >🇮🇳 ML</button>
+                </div>
               </div>
               <div className="rtc__dot-divider" />
               <div>

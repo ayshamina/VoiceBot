@@ -27,6 +27,15 @@ async def lifespan(app: FastAPI):
         print(f"[DB] Error initializing database: {e}")
         print(f"[DB] Make sure PostgreSQL is running and DATABASE_URL is correct in .env")
     
+    # Warm up RAG vector database and embeddings model to avoid first-query delay
+    try:
+        print("[RAG] Warming up vector database and embeddings model...")
+        from app.core.vectorstore import get_vector_store
+        get_vector_store()
+        print("[RAG] Vector store warmed up successfully!")
+    except Exception as e:
+        print(f"[RAG] Error warming up vector store: {e}")
+    
     yield
     print("[STOP] Shutting down...")
 

@@ -27,8 +27,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "Please leave your name and phone number, and we will call you back during working hours."
     ),
     "after_hours_message_ml": (
-        "Admissions team ippol office hours-il alla. "
-        "Dayavayi ningalude peru, phone number parayuka; working hours-il njangal thirichu vilikkum."
+        "ഹലോ, ബ്രിഡ്ജിയോണിലേക്ക് വിളിച്ചതിന് നന്ദി. ഞങ്ങളുടെ അഡ്മിഷൻ ടീം ഇപ്പോൾ ഓഫീസ് സമയത്തിന് പുറത്താണ്. "
+        "ദയവായി നിങ്ങളുടെ പേരും ഫോൺ നമ്പറും പറയൂ, പ്രവൃത്തിസമയങ്ങളിൽ ഞങ്ങളുടെ ടീം നിങ്ങളെ തിരികെ ബന്ധപ്പെടുന്നതായിരിക്കും."
     ),
     "escalation_enabled": True,
     "auto_escalate_after_attempts": 3,

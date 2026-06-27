@@ -121,7 +121,7 @@ export function createSpeechRecognition(language = 'en') {
   if (!SpeechRecognition) return null;
 
   const recognition = new SpeechRecognition();
-  recognition.lang = language === 'ml' ? 'ml-IN' : 'en-IN';
+  recognition.lang = (language === 'ml' || language === 'auto') ? 'ml-IN' : 'en-IN';
   recognition.interimResults = false; // disable interim for full phrases
   recognition.continuous = false; // single utterance per start
   // If user starts speaking while bot is talking, cancel the bot audio to simulate human interruption.

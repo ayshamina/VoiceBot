@@ -345,5 +345,70 @@ def test_search_company_info_general(mock_ddgs_text):
     assert "https://react.dev" in res
 
 
+def test_bilingual_language_switch():
+    session_id = "test-bilingual-switch-session"
+    client.post("/api/v1/bot/reset", json={"session_id": session_id})
+
+    # 1. Start session (defaults to English)
+    resp = client.post("/api/v1/bot/chat", json={"text": "__START__", "session_id": session_id})
+    assert resp.status_code == 200
+    assert resp.json()["language"] == "en"
+
+    # 2. Speak English - should stay English
+    resp_en = client.post("/api/v1/bot/chat", json={"text": "Hello, I want to explore courses", "session_id": session_id})
+    assert resp_en.status_code == 200
+    assert resp_en.json()["language"] == "en"
+
+    # 3. Speak Manglish/Malayalam transliterated - should switch to Malayalam
+    resp_ml = client.post("/api/v1/bot/chat", json={"text": "MERN Stack-inte fees ethrayaanu?", "session_id": session_id})
+    assert resp_ml.status_code == 200
+    assert resp_ml.json()["language"] == "ml"
+
+    # 4. Speak a long English question - should switch back to English
+    resp_back_en = client.post("/api/v1/bot/chat", json={"text": "What are the job placement opportunities?", "session_id": session_id})
+    assert resp_back_en.status_code == 200
+    assert resp_back_en.json()["language"] == "en"
+
+    # 5. Send an explicit switch command - should switch to Malayalam
+    resp_explicit = client.post("/api/v1/bot/chat", json={"text": "switch to malayalam please", "session_id": session_id})
+    assert resp_explicit.status_code == 200
+    assert resp_explicit.json()["language"] == "ml"
+
+
+def test_search_company_info_out_of_scope():
+    from app.services.voice import search_company_info
+    res = search_company_info("latest Malayalam news")
+    assert res == "No results found on the web."
+
+
+@patch("app.core.rag.retrieve_relevant_docs")
+@patch("app.core.rag._get_index")
+def test_retrieve_grounded_answer_async_out_of_scope(mock_get_index, mock_retrieve_docs):
+    mock_get_index.return_value = []
+    mock_retrieve_docs.return_value = []
+    from app.core.rag import retrieve_grounded_answer_async
+    from sqlalchemy.orm import Session
+    import asyncio
+    
+    mock_db = MagicMock(spec=Session)
+    res = asyncio.run(retrieve_grounded_answer_async(
+        query="what is the weather today?",
+        db=mock_db,
+        language="en"
+    ))
+    # Since it's out of scope and local DB is empty, it shouldn't run web search, and return empty string
+    assert res == ""
+
+
+def test_normalize_voice_transcript():
+    from app.services.voice import normalize_voice_transcript
+    assert normalize_voice_transcript("tell me about the marn stack course") == "tell me about the mern stack course"
+    assert normalize_voice_transcript("bridge on placements") == "bridgeon placements"
+    assert normalize_voice_transcript("tell me about flatter course") == "tell me about flutter course"
+
+
+
+
+
 
 

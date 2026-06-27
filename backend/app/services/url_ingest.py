@@ -84,7 +84,7 @@ async def ingest_url(url: str, collection_name: str = "bridgeon_docs") -> None:
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     # 5. Persist to Chroma
-    store_path = Path(__file__).resolve().parents[3] / "data" / "vectorstore" / collection_name
+    store_path = Path(__file__).resolve().parents[2] / "data" / "vectorstore" / collection_name
     os.makedirs(store_path, exist_ok=True)
     
     # Store source metadata so retriever knows the URL origin
